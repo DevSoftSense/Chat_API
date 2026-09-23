@@ -1,4 +1,4 @@
-using Chat.Infrastructure.Services;
+using Chat.Infrastructure.Services.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -60,6 +60,12 @@ public sealed class DatabaseHelper
         return new NpgsqlConnection(connectionString);
     }
 
+    /// <summary>
+    /// Npgsql command timeout in seconds. Config: Database:CommandTimeoutSeconds (default 30).
+    /// </summary>
+    public int CommandTimeoutSeconds =>
+        Math.Clamp(_configuration.GetValue("Database:CommandTimeoutSeconds", 30), 5, 120);
+
     public async Task<List<T>> ExecuteRawQueryAsync<T>(
         string sql,
         Action<NpgsqlCommand> buildParameters,
@@ -75,7 +81,7 @@ public sealed class DatabaseHelper
 
             await using var command = new NpgsqlCommand(sql, connection)
             {
-                CommandTimeout = 60
+                CommandTimeout = CommandTimeoutSeconds
             };
 
             buildParameters(command);
@@ -112,7 +118,7 @@ public sealed class DatabaseHelper
 
             await using var command = new NpgsqlCommand(sql, connection)
             {
-                CommandTimeout = 60
+                CommandTimeout = CommandTimeoutSeconds
             };
 
             buildParameters(command);
@@ -142,7 +148,7 @@ public sealed class DatabaseHelper
 
             await using var command = new NpgsqlCommand(sql, connection)
             {
-                CommandTimeout = 60
+                CommandTimeout = CommandTimeoutSeconds
             };
 
             buildParameters(command);

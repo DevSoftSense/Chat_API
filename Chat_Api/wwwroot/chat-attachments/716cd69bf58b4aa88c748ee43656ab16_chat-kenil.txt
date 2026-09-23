@@ -1,0 +1,31 @@
+Chat with Kenil
+
+[17:32] Kenil: hello
+[12:08] Kenil: hello world
+[14:26] You: hello
+[15:12] You: hello I am kenil
+[15:13] Kenil: hii
+[15:27] Kenil: hello kenil bhai kem cho?
+[15:28] Kenil: hello java bhai kem cho?
+[15:59] Kenil: Jayramdhani
+[16:01] Kenil: ram ram
+[16:02] You: ramrambhai
+[16:02] You: jaybhavni
+[12:26] Kenil: Jayramdhani
+[12:26] Kenil: hello java bhai kem cho?
+[12:27] Kenil: hello java bhai kem cho?
+[12:32] Kenil: hello
+[12:34] Kenil: hello bhai kem cho?
+[12:35] You: saru che bhai
+[12:36] You: hello kenil kakadiya
+[12:36] You: jay mataji
+[12:36] You: jay swaminaryn
+[13:57] Kenil: hello
+[14:44] Kenil: knjk
+[17:51] Kenil: [File] c6e35a3c7f70_PostgreSQL_25_Tables_Final_ERD_Excel_Updated.xlsx
+[18:27] Kenil: [File] ImportStockTakingData.xlsx
+[18:30] You: [File] Chat_Project_Additional_Tables.xlsx
+[18:32] Kenil: [File] 7343ba7a-ae7a-4965-85e3-f4ab26a9a121.png
+[18:32] Kenil: [File] WhatsApp Image 2026-09-09 at 12.01.30 AM.jpeg
+[18:10] Kenil: [File] ImportStockTakingData.xlsx
+[18:12] You: [File] ImportStockTakingData.xlsx

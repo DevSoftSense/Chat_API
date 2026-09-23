@@ -1,0 +1,14 @@
+<Project>
+  <!--
+    Permanent fix for MSB3027/MSB3021:
+    Chat_Api.exe locks bin\Debug\net9.0\*.dll while running.
+    Stop it before ANY project in this solution builds so VS/dotnet can copy DLLs.
+  -->
+  <Target Name="StopRunningChatApiBeforeBuild" BeforeTargets="BeforeBuild">
+    <Exec
+      Command="taskkill /F /IM Chat_Api.exe /T &gt;nul 2&gt;&amp;1 &amp; exit /B 0"
+      IgnoreExitCode="true"
+      ContinueOnError="true"
+      Condition="'$(OS)' == 'Windows_NT'" />
+  </Target>
+</Project>

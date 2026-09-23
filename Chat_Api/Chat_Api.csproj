@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LaunchBrowser>true</LaunchBrowser>
@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.8" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.19" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <PackageReference Include="Swashbuckle.AspNetCore.SwaggerGen" Version="10.2.3" />
@@ -28,5 +28,14 @@
     <Folder Include="Models\" />
     <Folder Include="wwwroot\chat-attachments\" />
   </ItemGroup>
+
+  <!-- Backup stop for this web host (also covered by Directory.Build.targets). -->
+  <Target Name="StopChatApiHostBeforeBuild" BeforeTargets="BeforeBuild">
+    <Exec
+      Command="taskkill /F /IM Chat_Api.exe /T &gt;nul 2&gt;&amp;1 &amp; exit /B 0"
+      IgnoreExitCode="true"
+      ContinueOnError="true"
+      Condition="'$(OS)' == 'Windows_NT'" />
+  </Target>
 
 </Project>
