@@ -666,13 +666,21 @@ public sealed class ChatRepository : IChatRepository
         int appId,
         int fiscalYearId,
         CancellationToken cancellationToken = default,
-        string? referenceType = null)
+        string? referenceType = null,
+        string? notificationType = null,
+        string? referenceEntity = null)
     {
         try
         {
             var resolvedReferenceType = string.IsNullOrWhiteSpace(referenceType)
                 ? "CHAT"
                 : referenceType.Trim();
+            var resolvedNotificationType = string.IsNullOrWhiteSpace(notificationType)
+                ? "MESSAGE"
+                : notificationType.Trim();
+            var resolvedReferenceEntity = string.IsNullOrWhiteSpace(referenceEntity)
+                ? "tab_messages"
+                : referenceEntity.Trim();
 
             var rows = await _databaseHelper.ExecuteRawQueryAsync(
                 @"SELECT *
@@ -690,9 +698,9 @@ public sealed class ChatRepository : IChatRepository
                     command.Parameters.AddWithValue("p_org_id", (long)orgId);
                     command.Parameters.AddWithValue("p_app_id", appId);
                     command.Parameters.AddWithValue("p_fiscal_year_id", fiscalYearId);
-                    command.Parameters.AddWithValue("p_notification_type", "MESSAGE");
+                    command.Parameters.AddWithValue("p_notification_type", resolvedNotificationType);
                     command.Parameters.AddWithValue("p_reference_type", resolvedReferenceType);
-                    command.Parameters.AddWithValue("p_reference_entity", "tab_messages");
+                    command.Parameters.AddWithValue("p_reference_entity", resolvedReferenceEntity);
                 },
                 MapNotification,
                 cancellationToken);

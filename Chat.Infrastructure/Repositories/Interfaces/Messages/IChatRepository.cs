@@ -66,7 +66,9 @@ public interface IChatRepository
         int appId,
         int fiscalYearId,
         CancellationToken cancellationToken = default,
-        string? referenceType = null);
+        string? referenceType = null,
+        string? notificationType = null,
+        string? referenceEntity = null);
 
     Task<ChatNotificationListResult> GetNotificationsAsync(
         long userId,
