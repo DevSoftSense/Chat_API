@@ -35,6 +35,14 @@ public sealed class ChatHub : Hub
     /// <summary>userId → active SignalR connection count (multi-tab safe).</summary>
     private static readonly ConcurrentDictionary<long, int> OnlineConnectionCounts = new();
 
+    /// <summary>userId → Settings My Status (Online/Away/Busy/Offline) while connected.</summary>
+    private static readonly ConcurrentDictionary<long, (string Status, string StatusMessage)> UserStatuses = new();
+
+    private static readonly HashSet<string> AllowedPresenceStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Online", "Away", "Busy", "Offline"
+    };
+
     public static bool IsUserOnline(long userId) =>
         OnlineConnectionCounts.TryGetValue(userId, out var count) && count > 0;
 
@@ -60,8 +68,67 @@ public sealed class ChatHub : Hub
             .ToArray();
         await Clients.Caller.SendAsync("OnlineUsers", onlineIds);
 
+        // Late snapshot of peer statuses for this caller.
+        await Clients.Caller.SendAsync("UserStatuses", SnapshotUserStatuses());
+
         await base.OnConnectedAsync();
     }
+
+    /// <summary>
+    /// Late subscribers (UI mounted after hub already connected) request a fresh snapshot.
+    /// </summary>
+    public Task RequestOnlineUsers()
+    {
+        var onlineIds = OnlineConnectionCounts
+            .Where(kv => kv.Value > 0)
+            .Select(kv => kv.Key)
+            .ToArray();
+        return Clients.Caller.SendAsync("OnlineUsers", onlineIds);
+    }
+
+    /// <summary>Settings → My Status snapshot for late subscribers.</summary>
+    public Task RequestUserStatuses() =>
+        Clients.Caller.SendAsync("UserStatuses", SnapshotUserStatuses());
+
+    /// <summary>
+    /// Settings → My Status. Broadcasts UserStatusChanged to other clients.
+    /// </summary>
+    public async Task SetUserStatus(string status, string? statusMessage)
+    {
+        var userId = CurrentUserHelper.GetUserId(Context.User)
+            ?? throw new HubException("Authenticated user id claim is missing.");
+
+        var normalized = string.IsNullOrWhiteSpace(status) ? "Online" : status.Trim();
+        if (!AllowedPresenceStatuses.Contains(normalized))
+            throw new HubException("status must be Online, Away, Busy, or Offline.");
+
+        normalized = AllowedPresenceStatuses.First(s =>
+            s.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+        var message = (statusMessage ?? string.Empty).Trim();
+        if (message.Length > 200)
+            message = message[..200];
+
+        UserStatuses[userId] = (normalized, message);
+
+        await Clients.Others.SendAsync(
+            "UserStatusChanged",
+            new
+            {
+                userId,
+                status = normalized,
+                statusMessage = message
+            });
+    }
+
+    private static object[] SnapshotUserStatuses() =>
+        UserStatuses
+            .Select(kv => (object)new
+            {
+                userId = kv.Key,
+                status = kv.Value.Status,
+                statusMessage = kv.Value.StatusMessage
+            })
+            .ToArray();
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
@@ -78,6 +145,7 @@ public sealed class ChatHub : Hub
             if (remaining == 0)
             {
                 OnlineConnectionCounts.TryRemove(userId.Value, out _);
+                UserStatuses.TryRemove(userId.Value, out _);
                 await Clients.Others.SendAsync("UserOffline", userId.Value);
             }
         }

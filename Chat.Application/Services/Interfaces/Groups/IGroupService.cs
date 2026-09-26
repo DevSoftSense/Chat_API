@@ -45,6 +45,17 @@ public interface IGroupService
         int fiscalYearId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Admin-only: make / dismiss group admin (WhatsApp-style multi-admin).</summary>
+    Task<GroupMemberChangeResult> SetGroupMemberAdminAsync(
+        long groupId,
+        long targetUserId,
+        long authenticatedUserId,
+        bool isAdmin,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default);
+
     Task<ChatGroupDto> UpdateGroupAsync(
         long groupId,
         long authenticatedUserId,

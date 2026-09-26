@@ -118,6 +118,15 @@ public interface IChatRepository
         int? fiscalYearId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>WhatsApp-style: all users who reacted to a message.</summary>
+    Task<MessageReactionListResult> GetMessageReactionsAsync(
+        long messageId,
+        long authenticatedUserId,
+        int orgId,
+        int appId,
+        int? fiscalYearId,
+        CancellationToken cancellationToken = default);
+
     Task<ClearChatResult> ClearChatAsync(
         int chatId,
         long authenticatedUserId,

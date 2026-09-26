@@ -84,15 +84,12 @@ BEGIN
             CASE
                 WHEN a.expires_at IS NOT NULL AND a.expires_at < NOW() THEN 3
                 WHEN a.expires_at IS NOT NULL AND a.expires_at <= (NOW() + INTERVAL '7 days') THEN 2
-                WHEN LOWER(TRIM(a.status_name)) IN ('expired') THEN 3
-                WHEN LOWER(TRIM(a.status_name)) IN ('expiring soon') THEN 2
                 ELSE 1
             END AS status_id,
             CASE
                 WHEN a.expires_at IS NOT NULL AND a.expires_at < NOW() THEN 'Expired'::VARCHAR
                 WHEN a.expires_at IS NOT NULL AND a.expires_at <= (NOW() + INTERVAL '7 days') THEN 'Expiring Soon'::VARCHAR
-                WHEN LOWER(TRIM(a.status_name)) = 'important' THEN 'Active'::VARCHAR
-                ELSE a.status_name::VARCHAR
+                ELSE 'Active'::VARCHAR
             END AS status_name,
             a.posted_by,
             NULL::VARCHAR AS posted_by_name,
@@ -153,8 +150,7 @@ BEGIN
                   CASE
                       WHEN a.expires_at IS NOT NULL AND a.expires_at < NOW() THEN 'expired'
                       WHEN a.expires_at IS NOT NULL AND a.expires_at <= (NOW() + INTERVAL '7 days') THEN 'expiring soon'
-                      WHEN LOWER(TRIM(a.status_name)) = 'important' THEN 'active'
-                      ELSE a.status_name
+                      ELSE 'active'
                   END
               )) = v_status
           )

@@ -101,13 +101,8 @@ BEGIN
         v_status_name := 'Expired';
     ELSIF p_expiry_date IS NOT NULL AND p_expiry_date <= (NOW() + INTERVAL '7 days') THEN
         v_status_name := 'Expiring Soon';
-    ELSIF p_status_id IS NOT NULL THEN
-        v_status_name := CASE p_status_id
-            WHEN 2 THEN 'Expiring Soon'
-            WHEN 3 THEN 'Expired'
-            ELSE 'Active'
-        END;
-    ELSIF LOWER(TRIM(COALESCE(v_status_name, ''))) = 'important' THEN
+    ELSE
+        -- Future expiry, cleared expiry, or no expiry → Active (never leave stale Expired)
         v_status_name := 'Active';
     END IF;
 

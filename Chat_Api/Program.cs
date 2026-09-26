@@ -76,7 +76,10 @@ builder.Services.AddScoped<IAnnouncementRepository, AnnouncementRepository>();
 builder.Services.AddScoped<IAnnouncementService, AnnouncementService>();
 builder.Services.AddScoped<IOrganisationSettingRepository, OrganisationSettingRepository>();
 builder.Services.AddScoped<IOrganisationSettingService, OrganisationSettingService>();
+builder.Services.AddScoped<Chat.Infrastructure.Repositories.Interfaces.Settings.ISettingsRepository, Chat.Infrastructure.Repositories.Classes.Settings.SettingsRepository>();
+builder.Services.AddScoped<Chat.Application.Services.Interfaces.Settings.ISettingsService, Chat.Application.Services.Classes.Settings.SettingsService>();
 builder.Services.AddSingleton<Chat_Api.Helpers.ChatAttachmentStorage>();
+builder.Services.AddSingleton<Chat.Application.Services.Interfaces.Settings.IAttachmentFileSizeResolver, Chat_Api.Helpers.AttachmentFileSizeResolver>();
 
 // ─── SoftOnCloud JWT validation (same secret used to sign SoftOnCloud tokens) ─
 var jwtKey = builder.Configuration["Jwt:Key"]

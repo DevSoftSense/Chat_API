@@ -43,7 +43,21 @@ BEGIN
             t.type_name,
             m.parent_message_id,
             m.sent_at,
-            m.read_at,
+            -- Group read receipts live in tab_message_receipts (not tab_messages.read_at).
+            CASE
+                WHEN m.sender_user_id IS NOT DISTINCT FROM p_user_id THEN
+                    (
+                        SELECT MIN(r.read_at)
+                        FROM public.tab_message_receipts r
+                        WHERE r.message_id = m.message_id
+                          AND r.user_id IS DISTINCT FROM p_user_id::integer
+                          AND r.read_at IS NOT NULL
+                          AND r.org_id = p_org_id
+                          AND r.app_id = p_app_id
+                          AND r.fiscal_year_id IS NOT DISTINCT FROM p_fiscal_year_id
+                    )
+                ELSE NULL
+            END,
             m.created_at,
             m.updated_at,
             m.attachment_path_1::text,
@@ -139,7 +153,10 @@ BEGIN
               AND r.user_id = p_user_id
               AND r.app_id = p_app_id
               AND r.org_id = p_org_id
-              AND r.fiscal_year_id IS NOT DISTINCT FROM p_fiscal_year_id
+              AND (
+                    r.fiscal_year_id IS NOT DISTINCT FROM p_fiscal_year_id
+                 OR r.fiscal_year_id IS NULL
+              )
             ORDER BY r.reacted_on DESC NULLS LAST, r.reaction_id DESC
             LIMIT 1
         ) my_r ON true
@@ -152,8 +169,10 @@ BEGIN
                       AND r2.user_id IS DISTINCT FROM p_user_id
                       AND r2.app_id = p_app_id
                       AND r2.org_id = p_org_id
-                      AND r2.fiscal_year_id IS NOT DISTINCT FROM p_fiscal_year_id
-                    ORDER BY r2.reacted_on DESC NULLS LAST, r2.reaction_id DESC
+                    ORDER BY
+                        CASE WHEN r2.fiscal_year_id IS NOT DISTINCT FROM p_fiscal_year_id THEN 0 ELSE 1 END,
+                        r2.reacted_on DESC NULLS LAST,
+                        r2.reaction_id DESC
                     LIMIT 1
                 ) AS reaction_code,
                 NULLIF(
@@ -164,7 +183,6 @@ BEGIN
                           AND r3.user_id IS DISTINCT FROM p_user_id
                           AND r3.app_id = p_app_id
                           AND r3.org_id = p_org_id
-                          AND r3.fiscal_year_id IS NOT DISTINCT FROM p_fiscal_year_id
                           AND NULLIF(btrim(COALESCE(r3.reaction, '')), '') IS NOT NULL
                     ),
                     ''
@@ -177,7 +195,7 @@ BEGIN
           AND m.deleted_at IS NULL
           AND COALESCE(m.is_draft, false) = false
           AND COALESCE(m.delete_flag, 0) = 0
-          AND m.group_id = v_group_id
+          AND (m.group_id IS NOT DISTINCT FROM v_group_id OR m.group_id IS NULL)
         ORDER BY m.sent_at ASC NULLS LAST, m.message_id ASC;
 
         RETURN;

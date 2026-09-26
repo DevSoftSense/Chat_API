@@ -137,6 +137,29 @@ public sealed class GroupService : IGroupService
             groupId, targetUserId, authenticatedUserId, orgId, appId, fiscalYearId, cancellationToken);
     }
 
+    public async Task<GroupMemberChangeResult> SetGroupMemberAdminAsync(
+        long groupId,
+        long targetUserId,
+        long authenticatedUserId,
+        bool isAdmin,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        if (groupId <= 0)
+            throw new ChatOperationException("groupId is required.");
+        if (targetUserId <= 0)
+            throw new ChatOperationException("userId is required.");
+        if (authenticatedUserId <= 0)
+            throw new ChatOperationException("Authenticated user id is required.", 401);
+        if (orgId <= 0 || appId <= 0 || fiscalYearId <= 0)
+            throw new ChatOperationException("orgId, appId and fiscalYearId are required.");
+
+        return await _groupRepository.SetGroupMemberAdminAsync(
+            groupId, targetUserId, authenticatedUserId, isAdmin, orgId, appId, fiscalYearId, cancellationToken);
+    }
+
     public async Task<ChatGroupDto> UpdateGroupAsync(
         long groupId,
         long authenticatedUserId,
@@ -237,9 +260,10 @@ public sealed class GroupService : IGroupService
         int? fiscalYearId,
         CancellationToken cancellationToken = default)
     {
-        if (messageId <= 0 || receiverUserId <= 0 || chatId <= 0)
+        if (messageId <= 0 || receiverUserId <= 0)
             return;
 
+        // chatId may be 0 — repository resolves chat/org/app/fy from the message row.
         await _groupRepository.MarkMessageDeliveredAsync(
             messageId, receiverUserId, chatId, orgId, appId, fiscalYearId, cancellationToken);
     }

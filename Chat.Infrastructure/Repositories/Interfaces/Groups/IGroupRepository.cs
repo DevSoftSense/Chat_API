@@ -48,6 +48,17 @@ public interface IGroupRepository
         int fiscalYearId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Admin-only: promote or demote member as group admin (multi-admin).</summary>
+    Task<GroupMemberChangeResult> SetGroupMemberAdminAsync(
+        long groupId,
+        long targetUserId,
+        long requestingUserId,
+        bool isAdmin,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default);
+
     Task<ChatGroupDto> UpdateGroupAsync(
         long groupId,
         string groupName,

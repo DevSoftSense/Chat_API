@@ -307,6 +307,61 @@ public sealed class GroupRepository : IGroupRepository
         }
     }
 
+    public async Task<GroupMemberChangeResult> SetGroupMemberAdminAsync(
+        long groupId,
+        long targetUserId,
+        long requestingUserId,
+        bool isAdmin,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var connection = await _databaseHelper.GetDefaultConnectionAsync(cancellationToken);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new NpgsqlCommand(
+                @"SELECT group_id, user_id, is_admin, joined_at, is_active
+                  FROM public.fn_chat_set_group_member_admin(
+                      @p_group_id, @p_target_user_id, @p_requesting_user_id, @p_is_admin,
+                      @p_org_id, @p_app_id, @p_fiscal_year_id);",
+                connection)
+            {
+                CommandTimeout = _databaseHelper.CommandTimeoutSeconds
+            };
+
+            command.Parameters.AddWithValue("p_group_id", groupId);
+            command.Parameters.AddWithValue("p_target_user_id", targetUserId);
+            command.Parameters.AddWithValue("p_requesting_user_id", requestingUserId);
+            command.Parameters.AddWithValue("p_is_admin", isAdmin);
+            command.Parameters.AddWithValue("p_org_id", orgId);
+            command.Parameters.AddWithValue("p_app_id", appId);
+            command.Parameters.AddWithValue("p_fiscal_year_id", fiscalYearId);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                throw new ChatOperationException("Admin role was not updated.", 500);
+
+            return new GroupMemberChangeResult
+            {
+                GroupId = reader.GetInt64(reader.GetOrdinal("group_id")),
+                UserId = reader.GetInt32(reader.GetOrdinal("user_id")),
+                IsAdmin = reader.GetBoolean(reader.GetOrdinal("is_admin")),
+                JoinedAt = reader.IsDBNull(reader.GetOrdinal("joined_at"))
+                    ? null
+                    : reader.GetFieldValue<DateTimeOffset>(reader.GetOrdinal("joined_at")),
+                IsActive = reader.GetBoolean(reader.GetOrdinal("is_active"))
+            };
+        }
+        catch (PostgresException ex)
+        {
+            _logger.LogError(ex, "PostgreSQL error in SetGroupMemberAdminAsync");
+            throw new ChatOperationException(ex.MessageText, MapPostgresStatus(ex.SqlState));
+        }
+    }
+
     public async Task<ChatGroupDto> UpdateGroupAsync(
         long groupId,
         string groupName,
@@ -741,11 +796,9 @@ public sealed class GroupRepository : IGroupRepository
             int resolvedOrg = orgId;
             int resolvedApp = appId;
             int resolvedFy = fiscalYearId ?? 0;
-            int resolvedChatId = chatId > 0 ? chatId : 0;
-            long? groupId = null;
 
             await using (var lookup = new NpgsqlCommand(
-                @"SELECT chat_id, group_id, org_id, app_id, fiscal_year_id, sender_user_id
+                @"SELECT org_id, app_id, fiscal_year_id, sender_user_id
                   FROM public.tab_messages
                   WHERE message_id = @p_message_id
                   LIMIT 1;",
@@ -759,9 +812,6 @@ public sealed class GroupRepository : IGroupRepository
                 if (!await reader.ReadAsync(cancellationToken))
                     return;
 
-                resolvedChatId = reader.GetInt32(reader.GetOrdinal("chat_id"));
-                if (!reader.IsDBNull(reader.GetOrdinal("group_id")))
-                    groupId = reader.GetInt64(reader.GetOrdinal("group_id"));
                 resolvedOrg = reader.GetInt32(reader.GetOrdinal("org_id"));
                 resolvedApp = reader.GetInt32(reader.GetOrdinal("app_id"));
                 if (!reader.IsDBNull(reader.GetOrdinal("fiscal_year_id")))
@@ -774,41 +824,9 @@ public sealed class GroupRepository : IGroupRepository
             if (resolvedOrg <= 0 || resolvedApp <= 0 || resolvedFy <= 0)
                 return;
 
-            if (groupId is null or <= 0)
-            {
-                groupId = await TryResolveGroupIdByChatAsync(
-                    connection, resolvedChatId, resolvedOrg, resolvedApp, resolvedFy, cancellationToken)
-                    ?? await TryResolveGroupIdFromMessagesAsync(connection, resolvedChatId, cancellationToken);
-            }
-            if (groupId is null or <= 0)
-                return;
-
             var userIdInt = checked((int)receiverUserId);
 
-            await using (var updateCmd = new NpgsqlCommand(
-                @"UPDATE public.tab_message_receipts
-                  SET delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP),
-                      updated_at = CURRENT_TIMESTAMP
-                  WHERE message_id = @p_message_id
-                    AND user_id = @p_user_id
-                    AND org_id = @p_org_id
-                    AND app_id = @p_app_id
-                    AND fiscal_year_id = @p_fiscal_year_id;",
-                connection)
-            {
-                CommandTimeout = _databaseHelper.CommandTimeoutSeconds
-            })
-            {
-                updateCmd.Parameters.AddWithValue("p_message_id", messageId);
-                updateCmd.Parameters.AddWithValue("p_user_id", userIdInt);
-                updateCmd.Parameters.AddWithValue("p_org_id", resolvedOrg);
-                updateCmd.Parameters.AddWithValue("p_app_id", resolvedApp);
-                updateCmd.Parameters.AddWithValue("p_fiscal_year_id", resolvedFy);
-                if (await updateCmd.ExecuteNonQueryAsync(cancellationToken) > 0)
-                    return;
-            }
-
-            await using var insertCmd = new NpgsqlCommand(
+            await using var upsertCmd = new NpgsqlCommand(
                 @"INSERT INTO public.tab_message_receipts (
                       message_id, user_id, delivered_at, read_at,
                       org_id, app_id, fiscal_year_id, created_at, updated_at
@@ -818,17 +836,20 @@ public sealed class GroupRepository : IGroupRepository
                       @p_org_id, @p_app_id, @p_fiscal_year_id,
                       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                   )
-                  ON CONFLICT DO NOTHING;",
+                  ON CONFLICT (message_id, user_id, org_id, app_id, fiscal_year_id)
+                  DO UPDATE SET
+                      delivered_at = COALESCE(public.tab_message_receipts.delivered_at, EXCLUDED.delivered_at),
+                      updated_at = CURRENT_TIMESTAMP;",
                 connection)
             {
                 CommandTimeout = _databaseHelper.CommandTimeoutSeconds
             };
-            insertCmd.Parameters.AddWithValue("p_message_id", messageId);
-            insertCmd.Parameters.AddWithValue("p_user_id", userIdInt);
-            insertCmd.Parameters.AddWithValue("p_org_id", resolvedOrg);
-            insertCmd.Parameters.AddWithValue("p_app_id", resolvedApp);
-            insertCmd.Parameters.AddWithValue("p_fiscal_year_id", resolvedFy);
-            await insertCmd.ExecuteNonQueryAsync(cancellationToken);
+            upsertCmd.Parameters.AddWithValue("p_message_id", messageId);
+            upsertCmd.Parameters.AddWithValue("p_user_id", userIdInt);
+            upsertCmd.Parameters.AddWithValue("p_org_id", resolvedOrg);
+            upsertCmd.Parameters.AddWithValue("p_app_id", resolvedApp);
+            upsertCmd.Parameters.AddWithValue("p_fiscal_year_id", resolvedFy);
+            await upsertCmd.ExecuteNonQueryAsync(cancellationToken);
         }
         catch (Exception ex)
         {

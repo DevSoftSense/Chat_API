@@ -899,14 +899,18 @@ public sealed class ChatController : ControllerBase
             // Live-sync reaction badge.
             // Group chats: resolve groupId from chatId (existing helper) — no DTO change.
             long? groupId = null;
-            if (tenant.FiscalYearId is > 0)
+            try
             {
                 groupId = await _groupRepository.GetGroupIdByChatIdAsync(
                     result.ChatId,
                     tenant.OrgId,
                     tenant.AppId,
-                    tenant.FiscalYearId.Value,
+                    tenant.FiscalYearId ?? 0,
                     cancellationToken);
+            }
+            catch
+            {
+                groupId = null;
             }
 
             var payload = new
@@ -925,6 +929,18 @@ public sealed class ChatController : ControllerBase
             {
                 await _hubContext.Clients
                     .Group(ChatHub.ChatGroup(groupId.Value))
+                    .SendAsync("MessageReaction", payload, cancellationToken);
+
+                // Also fan-out on user hubs so peers still update if JoinGroupChat missed.
+                if (result.SenderUserId > 0 && result.SenderUserId != userId.Value)
+                {
+                    await _hubContext.Clients
+                        .Group(ChatHub.UserGroup(result.SenderUserId))
+                        .SendAsync("MessageReaction", payload, cancellationToken);
+                }
+
+                await _hubContext.Clients
+                    .Group(ChatHub.UserGroup(userId.Value))
                     .SendAsync("MessageReaction", payload, cancellationToken);
             }
             else
@@ -945,6 +961,89 @@ public sealed class ChatController : ControllerBase
                     .Group(ChatHub.UserGroup(userId.Value))
                     .SendAsync("MessageReaction", payload, cancellationToken);
             }
+
+            // Notify message author when someone reacts (1:1 + group). Skip clear / self-react.
+            if (!string.IsNullOrWhiteSpace(result.ReactionCode)
+                && result.SenderUserId > 0
+                && result.SenderUserId != userId.Value
+                && tenant.FiscalYearId is > 0)
+            {
+                try
+                {
+                    var reactionPreview = string.IsNullOrWhiteSpace(result.Reaction)
+                        ? "Reacted to your message"
+                        : $"{result.Reaction.Trim()} reacted to your message";
+                    var referenceType = groupId is > 0 ? $"GROUP:{groupId.Value}" : "CHAT";
+
+                    var notification = await _chatService.CreateMessageNotificationAsync(
+                        result.SenderUserId,
+                        userId.Value,
+                        reactionPreview,
+                        result.MessageId,
+                        tenant.OrgId,
+                        tenant.AppId,
+                        tenant.FiscalYearId.Value,
+                        referenceType,
+                        cancellationToken,
+                        title: "New Reaction");
+
+                    var notificationPayload = new
+                    {
+                        notificationId = notification.NotificationId,
+                        notificationType = notification.NotificationType,
+                        title = notification.Title,
+                        message = notification.Message,
+                        referenceId = notification.ReferenceId,
+                        referenceType = notification.ReferenceType ?? referenceType,
+                        senderUserId = notification.SenderUserId,
+                        createdDate = notification.CreatedDate,
+                        isRead = notification.IsRead,
+                        groupId
+                    };
+
+                    await _hubContext.Clients
+                        .Group(ChatHub.UserGroup(result.SenderUserId))
+                        .SendAsync("ReceiveNotification", notificationPayload, cancellationToken);
+                }
+                catch (Exception)
+                {
+                    // Reaction already saved — do not fail API if notification fails.
+                }
+            }
+
+            return Ok(result);
+        }
+        catch (ChatOperationException ex)
+        {
+            return StatusCode(ex.StatusCode, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// WhatsApp-style: who reacted to this message (from tab_message_reactions).
+    /// </summary>
+    [HttpGet("messages/{messageId:long}/reactions")]
+    public async Task<IActionResult> GetMessageReactions(
+        long messageId,
+        [FromQuery] int? orgId,
+        [FromQuery] int? appId,
+        [FromQuery] int? fiscalYearId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userId = CurrentUserHelper.GetUserId(User);
+            if (userId is null)
+                return Unauthorized(new { message = "Authenticated user id claim is missing." });
+
+            var tenant = ResolveTenant(orgId, appId, fiscalYearId);
+            var result = await _chatService.GetMessageReactionsAsync(
+                messageId,
+                userId.Value,
+                tenant.OrgId,
+                tenant.AppId,
+                tenant.FiscalYearId,
+                cancellationToken);
 
             return Ok(result);
         }

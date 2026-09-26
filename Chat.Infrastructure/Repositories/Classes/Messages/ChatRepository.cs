@@ -105,7 +105,7 @@ public sealed class ChatRepository : IChatRepository
 
         try
         {
-            return await _databaseHelper.ExecuteRawQueryAsync(
+            var messages = await _databaseHelper.ExecuteRawQueryAsync(
                 sql,
                 command =>
                 {
@@ -118,6 +118,18 @@ public sealed class ChatRepository : IChatRepository
                 },
                 reader => MapChatMessage(reader, userId),
                 cancellationToken);
+
+            // Group ticks: tab_messages.read_at is usually null; receipts hold peer read_at.
+            // Peer reactions: backfill when fn returns empty (fy mismatch / stale fn).
+            if (fiscalYearId is int fy && messages.Count > 0)
+            {
+                await EnrichGroupOutgoingReadAtAsync(
+                    messages, userId, orgId, appId, fy, cancellationToken);
+                await EnrichPeerReactionsAsync(
+                    messages, userId, orgId, appId, fy, cancellationToken);
+            }
+
+            return messages;
         }
         catch (OperationCanceledException ex)
         {
@@ -518,6 +530,67 @@ public sealed class ChatRepository : IChatRepository
         catch (PostgresException ex)
         {
             _logger.LogError(ex, "PostgreSQL error in ToggleMessageReactionAsync");
+            throw new ChatOperationException(ex.MessageText, MapPostgresStatus(ex.SqlState));
+        }
+    }
+
+    public async Task<MessageReactionListResult> GetMessageReactionsAsync(
+        long messageId,
+        long authenticatedUserId,
+        int orgId,
+        int appId,
+        int? fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var connection = await _databaseHelper.GetDefaultConnectionAsync(cancellationToken);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new NpgsqlCommand(
+                @"SELECT message_id, user_id, reaction_code, reaction_emoji, reacted_on
+                  FROM public.fn_chat_get_message_reactions(
+                      @p_message_id, @p_user_id, @p_org_id, @p_app_id, @p_fiscal_year_id);",
+                connection)
+            {
+                CommandTimeout = _databaseHelper.CommandTimeoutSeconds
+            };
+
+            command.Parameters.AddWithValue("p_message_id", messageId);
+            command.Parameters.AddWithValue("p_user_id", authenticatedUserId);
+            command.Parameters.AddWithValue("p_org_id", orgId);
+            command.Parameters.AddWithValue("p_app_id", appId);
+            command.Parameters.AddWithValue("p_fiscal_year_id",
+                fiscalYearId ?? throw new ChatOperationException("fiscalYearId is required."));
+
+            var rows = new List<MessageReactionEntryDto>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(new MessageReactionEntryDto
+                {
+                    UserId = reader.GetInt32(reader.GetOrdinal("user_id")),
+                    ReactionCode = reader.IsDBNull(reader.GetOrdinal("reaction_code"))
+                        ? null
+                        : reader.GetString(reader.GetOrdinal("reaction_code")),
+                    ReactionEmoji = reader.IsDBNull(reader.GetOrdinal("reaction_emoji"))
+                        ? null
+                        : reader.GetString(reader.GetOrdinal("reaction_emoji")),
+                    ReactedOn = reader.IsDBNull(reader.GetOrdinal("reacted_on"))
+                        ? null
+                        : reader.GetFieldValue<DateTimeOffset>(reader.GetOrdinal("reacted_on"))
+                });
+            }
+
+            return new MessageReactionListResult
+            {
+                MessageId = messageId,
+                Reactions = rows
+            };
+        }
+        catch (PostgresException ex)
+        {
+            _logger.LogError(ex, "PostgreSQL error in GetMessageReactionsAsync");
             throw new ChatOperationException(ex.MessageText, MapPostgresStatus(ex.SqlState));
         }
     }
@@ -1056,6 +1129,155 @@ public sealed class ChatRepository : IChatRepository
             CommandTimeout = _databaseHelper.CommandTimeoutSeconds
         };
         await createIndexes.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task EnrichPeerReactionsAsync(
+        IList<ChatMessageDto> messages,
+        long currentUserId,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken)
+    {
+        var needsPeer = messages
+            .Where(m => string.IsNullOrWhiteSpace(m.PeerReaction) &&
+                        string.IsNullOrWhiteSpace(m.PeerReactionCode))
+            .Select(m => m.MessageId)
+            .Distinct()
+            .ToList();
+        if (needsPeer.Count == 0) return;
+
+        try
+        {
+            await using var connection = await _databaseHelper.GetDefaultConnectionAsync(cancellationToken);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = new NpgsqlCommand(
+                @"SELECT r.message_id,
+                         (ARRAY_AGG(r.reaction_code ORDER BY
+                             CASE WHEN r.fiscal_year_id IS NOT DISTINCT FROM @p_fiscal_year_id THEN 0 ELSE 1 END,
+                             r.reacted_on DESC NULLS LAST,
+                             r.reaction_id DESC))[1] AS reaction_code,
+                         NULLIF(string_agg(DISTINCT NULLIF(btrim(COALESCE(r.reaction, '')), ''), ''), '') AS reaction
+                  FROM public.tab_message_reactions r
+                  WHERE r.message_id = ANY(@p_message_ids)
+                    AND r.user_id IS DISTINCT FROM @p_user_id
+                    AND r.org_id = @p_org_id
+                    AND r.app_id = @p_app_id
+                  GROUP BY r.message_id;",
+                connection)
+            {
+                CommandTimeout = _databaseHelper.CommandTimeoutSeconds
+            };
+
+            cmd.Parameters.Add("p_message_ids", NpgsqlDbType.Array | NpgsqlDbType.Bigint).Value =
+                needsPeer.ToArray();
+            cmd.Parameters.AddWithValue("p_user_id", currentUserId);
+            cmd.Parameters.AddWithValue("p_org_id", orgId);
+            cmd.Parameters.AddWithValue("p_app_id", appId);
+            cmd.Parameters.AddWithValue("p_fiscal_year_id", fiscalYearId);
+
+            var byMessage = new Dictionary<long, (string? Code, string? Reaction)>();
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var messageId = reader.GetInt64(0);
+                var code = reader.IsDBNull(1) ? null : reader.GetString(1);
+                var reaction = reader.IsDBNull(2) ? null : reader.GetString(2);
+                byMessage[messageId] = (code, reaction);
+            }
+
+            if (byMessage.Count == 0) return;
+
+            foreach (var msg in messages)
+            {
+                if (!byMessage.TryGetValue(msg.MessageId, out var peer)) continue;
+                if (!string.IsNullOrWhiteSpace(msg.PeerReaction) ||
+                    !string.IsNullOrWhiteSpace(msg.PeerReactionCode))
+                {
+                    continue;
+                }
+
+                msg.PeerReactionCode = peer.Code;
+                msg.PeerReaction = peer.Reaction;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "EnrichPeerReactionsAsync failed for user {UserId}",
+                currentUserId);
+        }
+    }
+
+    private async Task EnrichGroupOutgoingReadAtAsync(
+        IList<ChatMessageDto> messages,
+        long currentUserId,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken)
+    {
+        var outgoingIds = messages
+            .Where(m => m.SenderUserId == currentUserId && m.ReadAt is null)
+            .Select(m => m.MessageId)
+            .Distinct()
+            .ToList();
+        if (outgoingIds.Count == 0) return;
+
+        try
+        {
+            await using var connection = await _databaseHelper.GetDefaultConnectionAsync(cancellationToken);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = new NpgsqlCommand(
+                @"SELECT r.message_id, MIN(r.read_at) AS read_at
+                  FROM public.tab_message_receipts r
+                  WHERE r.message_id = ANY(@p_message_ids)
+                    AND r.user_id IS DISTINCT FROM @p_user_id
+                    AND r.read_at IS NOT NULL
+                    AND r.org_id = @p_org_id
+                    AND r.app_id = @p_app_id
+                    AND r.fiscal_year_id IS NOT DISTINCT FROM @p_fiscal_year_id
+                  GROUP BY r.message_id;",
+                connection)
+            {
+                CommandTimeout = _databaseHelper.CommandTimeoutSeconds
+            };
+
+            cmd.Parameters.Add("p_message_ids", NpgsqlDbType.Array | NpgsqlDbType.Bigint).Value =
+                outgoingIds.ToArray();
+            cmd.Parameters.AddWithValue("p_user_id", checked((int)currentUserId));
+            cmd.Parameters.AddWithValue("p_org_id", orgId);
+            cmd.Parameters.AddWithValue("p_app_id", appId);
+            cmd.Parameters.AddWithValue("p_fiscal_year_id", fiscalYearId);
+
+            var readByMessage = new Dictionary<long, DateTimeOffset>();
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var messageId = reader.GetInt64(0);
+                if (!reader.IsDBNull(1))
+                    readByMessage[messageId] = reader.GetFieldValue<DateTimeOffset>(1);
+            }
+
+            if (readByMessage.Count == 0) return;
+
+            foreach (var msg in messages)
+            {
+                if (msg.SenderUserId != currentUserId || msg.ReadAt is not null) continue;
+                if (readByMessage.TryGetValue(msg.MessageId, out var readAt))
+                    msg.ReadAt = readAt;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "EnrichGroupOutgoingReadAtAsync failed for user {UserId}",
+                currentUserId);
+        }
     }
 
     private async Task<long?> TryResolveGroupIdByChatAsync(

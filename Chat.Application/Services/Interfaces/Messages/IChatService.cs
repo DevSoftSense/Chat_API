@@ -70,7 +70,8 @@ public interface IChatService
         int appId,
         int fiscalYearId,
         string? referenceType = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? title = null);
 
     Task<MarkMessagesReadResult> MarkMessagesReadAsync(
         int chatId,
@@ -100,6 +101,15 @@ public interface IChatService
         long messageId,
         long authenticatedUserId,
         string? reactionCode,
+        int orgId,
+        int appId,
+        int? fiscalYearId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>WhatsApp-style: who reacted to this message.</summary>
+    Task<MessageReactionListResult> GetMessageReactionsAsync(
+        long messageId,
+        long authenticatedUserId,
         int orgId,
         int appId,
         int? fiscalYearId,

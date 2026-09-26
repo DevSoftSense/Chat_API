@@ -19,3 +19,20 @@ public sealed class ToggleMessageReactionResult
     public string? Reaction { get; set; }
     public DateTimeOffset? ReactedOn { get; set; }
 }
+
+/// <summary>One reactor row for WhatsApp-style reaction details.</summary>
+public sealed class MessageReactionEntryDto
+{
+    public long UserId { get; set; }
+    public string? ReactionCode { get; set; }
+    public string? ReactionEmoji { get; set; }
+    public DateTimeOffset? ReactedOn { get; set; }
+}
+
+/// <summary>All reactors for a message (GET .../reactions).</summary>
+public sealed class MessageReactionListResult
+{
+    public long MessageId { get; set; }
+    public IReadOnlyList<MessageReactionEntryDto> Reactions { get; set; } =
+        Array.Empty<MessageReactionEntryDto>();
+}

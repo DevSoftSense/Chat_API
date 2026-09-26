@@ -278,7 +278,8 @@ public sealed class ChatService : IChatService
         int appId,
         int fiscalYearId,
         string? referenceType = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? title = null)
     {
         if (receiverUserId <= 0 || senderUserId <= 0)
             throw new ChatOperationException("receiverUserId and senderUserId are required.");
@@ -293,10 +294,12 @@ public sealed class ChatService : IChatService
         if (preview.Length > 200)
             preview = preview[..200];
 
+        var resolvedTitle = string.IsNullOrWhiteSpace(title) ? "New Message" : title.Trim();
+
         return await _chatRepository.CreateNotificationAsync(
             receiverUserId,
             senderUserId,
-            "New Message",
+            resolvedTitle,
             preview,
             messageId,
             orgId,
@@ -389,6 +392,27 @@ public sealed class ChatService : IChatService
 
         return await _chatRepository.ToggleMessageReactionAsync(
             messageId, authenticatedUserId, code, orgId, appId, fiscalYearId, cancellationToken);
+    }
+
+    public async Task<MessageReactionListResult> GetMessageReactionsAsync(
+        long messageId,
+        long authenticatedUserId,
+        int orgId,
+        int appId,
+        int? fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        if (messageId <= 0)
+            throw new ChatOperationException("messageId is required.");
+        if (authenticatedUserId <= 0)
+            throw new ChatOperationException("Authenticated user id is required.", 401);
+        if (orgId <= 0 || appId <= 0)
+            throw new ChatOperationException("orgId and appId are required.");
+        if (fiscalYearId is null or <= 0)
+            throw new ChatOperationException("fiscalYearId is required.");
+
+        return await _chatRepository.GetMessageReactionsAsync(
+            messageId, authenticatedUserId, orgId, appId, fiscalYearId, cancellationToken);
     }
 
     public async Task<ClearChatResult> ClearChatAsync(
