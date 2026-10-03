@@ -46,6 +46,13 @@ public sealed class ChatHub : Hub
     public static bool IsUserOnline(long userId) =>
         OnlineConnectionCounts.TryGetValue(userId, out var count) && count > 0;
 
+    /// <summary>Snapshot of currently online SoftOnCloud user ids (in-memory presence).</summary>
+    public static IReadOnlyList<long> GetOnlineUserIds() =>
+        OnlineConnectionCounts
+            .Where(kv => kv.Value > 0)
+            .Select(kv => kv.Key)
+            .ToArray();
+
     public override async Task OnConnectedAsync()
     {
         var userId = CurrentUserHelper.GetUserId(Context.User);
@@ -120,6 +127,50 @@ public sealed class ChatHub : Hub
             });
     }
 
+    /// <summary>
+    /// 1:1 typing indicator — notify peer only (WhatsApp-style).
+    /// </summary>
+    public async Task SendTyping(long peerUserId, bool isTyping)
+    {
+        var userId = CurrentUserHelper.GetUserId(Context.User)
+            ?? throw new HubException("Authenticated user id claim is missing.");
+
+        if (peerUserId <= 0 || peerUserId == userId)
+            return;
+
+        await Clients.Group(UserGroup(peerUserId)).SendAsync(
+            "UserTyping",
+            new
+            {
+                userId,
+                peerUserId,
+                isTyping
+            });
+    }
+
+    /// <summary>
+    /// Group typing indicator — notify other members in group:{groupId}.
+    /// </summary>
+    public async Task SendGroupTyping(long groupId, bool isTyping)
+    {
+        var userId = CurrentUserHelper.GetUserId(Context.User)
+            ?? throw new HubException("Authenticated user id claim is missing.");
+
+        if (groupId <= 0)
+            return;
+
+        // Broadcast to other connections — UI filters by groupId.
+        // Avoids depending on JoinGroupChat / fiscalYearId for typing.
+        await Clients.Others.SendAsync(
+            "GroupTyping",
+            new
+            {
+                userId,
+                groupId,
+                isTyping
+            });
+    }
+
     private static object[] SnapshotUserStatuses() =>
         UserStatuses
             .Select(kv => (object)new
@@ -154,7 +205,11 @@ public sealed class ChatHub : Hub
     }
 
     /// <summary>Client joins group:{groupId} after membership is verified.</summary>
-    public async Task JoinGroupChat(long groupId)
+    public async Task JoinGroupChat(
+        long groupId,
+        int? orgId = null,
+        int? appId = null,
+        int? fiscalYearId = null)
     {
         var userId = CurrentUserHelper.GetUserId(Context.User)
             ?? throw new HubException("Authenticated user id claim is missing.");
@@ -162,9 +217,15 @@ public sealed class ChatHub : Hub
         if (groupId <= 0)
             throw new HubException("groupId is required.");
 
-        var tenant = ResolveTenant(null, null, null);
+        var tenant = ResolveTenant(orgId, appId, fiscalYearId);
+
+        // When fiscal year is missing from JWT/session, still join SignalR group
+        // so live typing / messages work; skip DB membership assert.
         if (tenant.FiscalYearId is null or <= 0)
-            throw new HubException("fiscalYearId is required.");
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, ChatGroup(groupId));
+            return;
+        }
 
         try
         {

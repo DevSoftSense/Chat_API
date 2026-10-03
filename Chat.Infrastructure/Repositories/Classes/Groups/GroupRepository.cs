@@ -706,7 +706,7 @@ public sealed class GroupRepository : IGroupRepository
                       SELECT rr.delivered_at, rr.read_at
                       FROM public.tab_message_receipts rr
                       WHERE rr.message_id = @p_message_id
-                        AND rr.user_id = gm.user_id
+                        AND rr.user_id::bigint = gm.user_id::bigint
                       ORDER BY rr.read_at DESC NULLS LAST, rr.delivered_at DESC NULLS LAST
                       LIMIT 1
                   ) r ON TRUE
@@ -714,7 +714,7 @@ public sealed class GroupRepository : IGroupRepository
                     AND gm.left_at IS NULL
                     AND gm.org_id = @p_org_id
                     AND gm.app_id = @p_app_id
-                    AND gm.user_id IS DISTINCT FROM @p_sender_user_id
+                    AND gm.user_id::bigint IS DISTINCT FROM @p_sender_user_id::bigint
                   ORDER BY
                       CASE WHEN r.read_at IS NOT NULL THEN 0
                            WHEN r.delivered_at IS NOT NULL THEN 1
@@ -729,7 +729,7 @@ public sealed class GroupRepository : IGroupRepository
             membersCmd.Parameters.AddWithValue("p_group_id", groupId.Value);
             membersCmd.Parameters.AddWithValue("p_org_id", orgId);
             membersCmd.Parameters.AddWithValue("p_app_id", appId);
-            membersCmd.Parameters.AddWithValue("p_sender_user_id", Convert.ToInt32(senderUserId));
+            membersCmd.Parameters.AddWithValue("p_sender_user_id", senderUserId);
 
             await using (var memberReader = await membersCmd.ExecuteReaderAsync(cancellationToken))
             {
@@ -826,30 +826,44 @@ public sealed class GroupRepository : IGroupRepository
 
             var userIdInt = checked((int)receiverUserId);
 
-            await using var upsertCmd = new NpgsqlCommand(
-                @"INSERT INTO public.tab_message_receipts (
-                      message_id, user_id, delivered_at, read_at,
-                      org_id, app_id, fiscal_year_id, created_at, updated_at
-                  )
-                  VALUES (
-                      @p_message_id, @p_user_id, CURRENT_TIMESTAMP, NULL,
-                      @p_org_id, @p_app_id, @p_fiscal_year_id,
-                      CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                  )
-                  ON CONFLICT (message_id, user_id, org_id, app_id, fiscal_year_id)
-                  DO UPDATE SET
-                      delivered_at = COALESCE(public.tab_message_receipts.delivered_at, EXCLUDED.delivered_at),
-                      updated_at = CURRENT_TIMESTAMP;",
+            await using var updateCmd = new NpgsqlCommand(
+                @"UPDATE public.tab_message_receipts
+                  SET delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP),
+                      updated_at = CURRENT_TIMESTAMP
+                  WHERE message_id = @p_message_id
+                    AND user_id = @p_user_id;",
                 connection)
             {
                 CommandTimeout = _databaseHelper.CommandTimeoutSeconds
             };
-            upsertCmd.Parameters.AddWithValue("p_message_id", messageId);
-            upsertCmd.Parameters.AddWithValue("p_user_id", userIdInt);
-            upsertCmd.Parameters.AddWithValue("p_org_id", resolvedOrg);
-            upsertCmd.Parameters.AddWithValue("p_app_id", resolvedApp);
-            upsertCmd.Parameters.AddWithValue("p_fiscal_year_id", resolvedFy);
-            await upsertCmd.ExecuteNonQueryAsync(cancellationToken);
+            updateCmd.Parameters.AddWithValue("p_message_id", messageId);
+            updateCmd.Parameters.AddWithValue("p_user_id", userIdInt);
+            if (await updateCmd.ExecuteNonQueryAsync(cancellationToken) > 0)
+                return;
+
+            await using var insertCmd = new NpgsqlCommand(
+                @"INSERT INTO public.tab_message_receipts (
+                      message_id, user_id, delivered_at, read_at,
+                      org_id, app_id, fiscal_year_id, created_at, updated_at
+                  )
+                  SELECT
+                      @p_message_id, @p_user_id, CURRENT_TIMESTAMP, NULL,
+                      @p_org_id, @p_app_id, @p_fiscal_year_id,
+                      CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                  WHERE NOT EXISTS (
+                      SELECT 1 FROM public.tab_message_receipts r
+                      WHERE r.message_id = @p_message_id AND r.user_id = @p_user_id
+                  );",
+                connection)
+            {
+                CommandTimeout = _databaseHelper.CommandTimeoutSeconds
+            };
+            insertCmd.Parameters.AddWithValue("p_message_id", messageId);
+            insertCmd.Parameters.AddWithValue("p_user_id", userIdInt);
+            insertCmd.Parameters.AddWithValue("p_org_id", resolvedOrg);
+            insertCmd.Parameters.AddWithValue("p_app_id", resolvedApp);
+            insertCmd.Parameters.AddWithValue("p_fiscal_year_id", resolvedFy);
+            await insertCmd.ExecuteNonQueryAsync(cancellationToken);
         }
         catch (Exception ex)
         {

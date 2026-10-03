@@ -1397,11 +1397,14 @@ public sealed class ChatRepository : IChatRepository
         int fiscalYearId,
         CancellationToken cancellationToken)
     {
-        // Match by chat_id only (group messages sometimes have null / mismatched group_id).
-        // Avoid ON CONFLICT column lists — live unique indexes can differ by environment.
+        // Match receipts by message_id + user_id only (ignore org/app/fy mismatch).
         await using var cmd = new NpgsqlCommand(
             @"WITH target AS (
-                  SELECT m.message_id, m.sender_user_id
+                  SELECT m.message_id,
+                         m.sender_user_id,
+                         m.org_id,
+                         m.app_id,
+                         m.fiscal_year_id
                   FROM public.tab_messages m
                   WHERE m.chat_id = @p_chat_id
                     AND m.deleted_at IS NULL
@@ -1414,9 +1417,6 @@ public sealed class ChatRepository : IChatRepository
                         FROM public.tab_message_receipts r
                         WHERE r.message_id = m.message_id
                           AND r.user_id = @p_reader_user_id_int
-                          AND r.org_id = @p_org_id
-                          AND r.app_id = @p_app_id
-                          AND r.fiscal_year_id = @p_fiscal_year_id
                           AND r.read_at IS NOT NULL
                     )
               ),
@@ -1428,9 +1428,6 @@ public sealed class ChatRepository : IChatRepository
                   FROM target t
                   WHERE r.message_id = t.message_id
                     AND r.user_id = @p_reader_user_id_int
-                    AND r.org_id = @p_org_id
-                    AND r.app_id = @p_app_id
-                    AND r.fiscal_year_id = @p_fiscal_year_id
                     AND r.read_at IS NULL
                   RETURNING r.message_id, r.read_at
               ),
@@ -1444,9 +1441,9 @@ public sealed class ChatRepository : IChatRepository
                       @p_reader_user_id_int,
                       CURRENT_TIMESTAMP,
                       CURRENT_TIMESTAMP,
-                      @p_org_id,
-                      @p_app_id,
-                      @p_fiscal_year_id,
+                      COALESCE(NULLIF(t.org_id, 0), @p_org_id),
+                      COALESCE(NULLIF(t.app_id, 0), @p_app_id),
+                      COALESCE(NULLIF(t.fiscal_year_id, 0), @p_fiscal_year_id),
                       CURRENT_TIMESTAMP,
                       CURRENT_TIMESTAMP
                   FROM target t
@@ -1455,9 +1452,6 @@ public sealed class ChatRepository : IChatRepository
                       FROM public.tab_message_receipts r
                       WHERE r.message_id = t.message_id
                         AND r.user_id = @p_reader_user_id_int
-                        AND r.org_id = @p_org_id
-                        AND r.app_id = @p_app_id
-                        AND r.fiscal_year_id = @p_fiscal_year_id
                   )
                   RETURNING message_id, read_at
               ),

@@ -87,7 +87,7 @@ public sealed class DatabaseHelper
             buildParameters(command);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            while (await reader.ReadAsync(  ).ConfigureAwait(false))
             {
                 results.Add(map(reader));
             }

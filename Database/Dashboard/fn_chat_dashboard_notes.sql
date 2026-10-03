@@ -1,0 +1,23 @@
+-- Optional documentation of Dashboard aggregation logic.
+-- The Chat_Api DashboardRepository executes equivalent parameterized SQL inline
+-- (same pattern as SettingsRepository) so no mandatory DB deploy is required.
+--
+-- Unread count uses inline SQL (same filters as fn_chat_get_unread_message_count)
+-- so Dashboard works even when that function is not deployed.
+--
+-- Tables (existing only):
+--   tab_messages, tab_message_receipts, tab_groups, tab_group_members,
+--   tab_announcements, tab_announcement_recipients, tab_announcement_category_master,
+--   tab_employee_master, tab_department_master, tab_employee_role_master,
+--   tab_user_role, tab_role_master, tab_branch_master
+--
+-- Soft-delete / draft rules:
+--   messages: COALESCE(delete_flag,0)=0 AND deleted_at IS NULL AND COALESCE(is_draft,false)=false
+--   drafts card: is_draft=true AND non-empty message_body (excludes private-chat anchors)
+--   announcements: COALESCE(delete_flag,0)=0 AND status_name <> 'deleted'
+--
+-- Online employees: SignalR ChatHub in-memory presence ∩ tab_employee_master user_ids
+-- Favorite contacts: not implemented (no table) — API returns []
+
+-- Optional: deploy Database/fn_chat_get_unread_message_count.sql if Messages
+-- module needs the function; Dashboard no longer depends on it.
