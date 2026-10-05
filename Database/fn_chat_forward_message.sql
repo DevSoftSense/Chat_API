@@ -1,4 +1,4 @@
--- Uses existing public.tab_messages only.
+﻿-- Uses existing public.tab_messages only.
 -- Forwards by INSERTING a new row (never updates the original).
 -- Supports private destination OR group destination (via tab_groups.chat_id).
 
@@ -75,9 +75,9 @@ BEGIN
     IF p_original_message_id IS NULL
        OR p_destination_chat_id IS NULL
        OR p_forwarded_by IS NULL
-       OR p_org_id IS NULL
-       OR p_app_id IS NULL
-       OR p_fiscal_year_id IS NULL THEN
+       OR p_org_id IS NULL OR p_org_id <= 0
+       OR p_app_id IS NULL OR p_app_id <= 0
+       OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_forward_message: required parameters cannot be null'
             USING ERRCODE = '22023';
     END IF;
@@ -230,7 +230,7 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Group destination (chat_id on tab_groups) — only when no private receiver.
+    -- Group destination (chat_id on tab_groups) â€” only when no private receiver.
     SELECT g.group_id
     INTO v_dest_group_id
     FROM public.tab_groups g

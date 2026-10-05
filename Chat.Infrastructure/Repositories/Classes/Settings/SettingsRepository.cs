@@ -9,11 +9,12 @@ using NpgsqlTypes;
 namespace Chat.Infrastructure.Repositories.Classes.Settings;
 
 /// <summary>
-/// Settings data access using existing SoftOnCloud tables only (no new tables).
+/// Settings data access for Chat-owned tables only (no new tables).
 /// User prefs: tab_organisation_setting (setting_group=ChatUser, key={userId}.{suffix}).
 /// Notifications: tab_notification_settings (channel + is_enabled).
 /// Message types: tab_message_type_master (Excel alias: message_types).
 /// Messages/attachments: tab_messages (Excel alias: messages).
+/// Employee/profile data: SoftOnCloud HTTP APIs (UI); Chat does not query tab_employee_*.
 /// </summary>
 public sealed class SettingsRepository : ISettingsRepository
 {
@@ -40,152 +41,32 @@ public sealed class SettingsRepository : ISettingsRepository
         _logger = logger;
     }
 
-    public async Task<SettingsProfileDto?> GetEmployeeProfileAsync(
+    public Task<SettingsProfileDto?> GetEmployeeProfileAsync(
         long userId, int orgId, int appId,
         CancellationToken cancellationToken = default)
     {
-        const string sql = @"
-SELECT
-    e.employee_id,
-    e.user_id,
-    COALESCE(e.full_name, '') AS full_name,
-    COALESCE(e.email, '') AS email,
-    COALESCE(e.phone, '') AS phone,
-    e.photo_url,
-    COALESCE(
-        NULLIF(TRIM(erm.role_name), ''),
-        NULLIF(TRIM(rm.role_name), ''),
-        ''
-    ) AS role_name,
-    COALESCE(NULLIF(TRIM(d.department_name), ''), '') AS department_name,
-    COALESCE(NULLIF(TRIM(b.timezone), ''), '') AS timezone
-FROM public.tab_employee_master e
-LEFT JOIN public.tab_employee_role_master erm
-    ON erm.staff_role_id = e.staff_role_id
-   AND erm.org_id = e.org_id
-   AND erm.app_id = e.app_id
-LEFT JOIN public.tab_user_role ur
-    ON ur.user_id = e.user_id
-   AND ur.org_id = e.org_id
-   AND ur.app_id = e.app_id
-   AND COALESCE(ur.is_active, 1) = 1
-LEFT JOIN public.tab_role_master rm
-    ON rm.role_id = ur.role_id
-   AND rm.org_id = ur.org_id
-   AND rm.app_id = ur.app_id
-   AND COALESCE(rm.is_active, true) = true
-   AND COALESCE(rm.is_deleted, false) = false
-LEFT JOIN public.tab_department_master d
-    ON d.department_id = e.department_id
-   AND d.org_id = e.org_id
-   AND d.app_id = e.app_id
-LEFT JOIN public.tab_branch_master b
-    ON b.branch_id = e.branch_id
-   AND b.org_id = e.org_id
-   AND b.app_id = e.app_id
-WHERE e.user_id = @user_id
-  AND e.org_id = @org_id
-  AND (e.app_id = @app_id OR e.app_id IS NULL)
-ORDER BY CASE WHEN e.app_id = @app_id THEN 0 ELSE 1 END, e.employee_id ASC
-LIMIT 1;";
-
-        try
-        {
-            await using var connection = await _databaseHelper
-                .GetDefaultConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-            await using var command = new NpgsqlCommand(sql, connection)
-            {
-                CommandTimeout = _databaseHelper.CommandTimeoutSeconds
-            };
-            command.Parameters.AddWithValue("user_id", (int)userId);
-            command.Parameters.AddWithValue("org_id", orgId);
-            command.Parameters.AddWithValue("app_id", appId);
-
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken)
-                .ConfigureAwait(false);
-            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-                return null;
-
-            return new SettingsProfileDto
-            {
-                EmployeeId = reader.GetInt32(reader.GetOrdinal("employee_id")),
-                UserId = Convert.ToInt64(reader.GetValue(reader.GetOrdinal("user_id"))),
-                FullName = reader.GetString(reader.GetOrdinal("full_name")),
-                Email = reader.GetString(reader.GetOrdinal("email")),
-                Phone = reader.GetString(reader.GetOrdinal("phone")),
-                PhotoUrl = reader.IsDBNull(reader.GetOrdinal("photo_url"))
-                    ? null
-                    : reader.GetString(reader.GetOrdinal("photo_url")),
-                Role = reader.GetString(reader.GetOrdinal("role_name")),
-                Department = reader.GetString(reader.GetOrdinal("department_name")),
-                Timezone = reader.GetString(reader.GetOrdinal("timezone"))
-            };
-        }
-        catch (PostgresException ex)
-        {
-            throw MapPg(ex);
-        }
+        // SoftOnCloud HTTP APIs own employee/profile data; UI loads profile from there.
+        _ = userId;
+        _ = orgId;
+        _ = appId;
+        _ = cancellationToken;
+        return Task.FromResult<SettingsProfileDto?>(null);
     }
 
-    public async Task<bool> TryUpdateEmployeeProfileAsync(
+    public Task<bool> TryUpdateEmployeeProfileAsync(
         long userId, int orgId, int appId,
         string fullName, string? phone, string? photoUrl,
         CancellationToken cancellationToken = default)
     {
-        // SoftOnCloud often has employee rows with NULL user_id or different app_id.
-        // Prefer exact match; fall back to org + user_id only.
-        const string sqlExact = @"
-UPDATE public.tab_employee_master
-SET full_name = @full_name,
-    phone = @phone,
-    photo_url = COALESCE(@photo_url, photo_url),
-    updated_on = NOW()
-WHERE user_id = @user_id
-  AND org_id = @org_id
-  AND app_id = @app_id;";
-
-        const string sqlOrgUser = @"
-UPDATE public.tab_employee_master
-SET full_name = @full_name,
-    phone = @phone,
-    photo_url = COALESCE(@photo_url, photo_url),
-    updated_on = NOW()
-WHERE user_id = @user_id
-  AND org_id = @org_id;";
-
-        try
-        {
-            await using var connection = await _databaseHelper
-                .GetDefaultConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-            async Task<int> Exec(string sql)
-            {
-                await using var command = new NpgsqlCommand(sql, connection)
-                {
-                    CommandTimeout = _databaseHelper.CommandTimeoutSeconds
-                };
-                command.Parameters.AddWithValue("full_name", fullName);
-                command.Parameters.AddWithValue("phone", (object?)phone ?? DBNull.Value);
-                command.Parameters.AddWithValue("photo_url", (object?)photoUrl ?? DBNull.Value);
-                command.Parameters.AddWithValue("user_id", (int)userId);
-                command.Parameters.AddWithValue("org_id", orgId);
-                command.Parameters.AddWithValue("app_id", appId);
-                return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            var rows = await Exec(sqlExact).ConfigureAwait(false);
-            if (rows <= 0)
-                rows = await Exec(sqlOrgUser).ConfigureAwait(false);
-
-            return rows > 0;
-        }
-        catch (PostgresException ex)
-        {
-            throw MapPg(ex);
-        }
+        // No-op: profile updates must go through SoftOnCloud APIs, not tab_employee_master.
+        _ = userId;
+        _ = orgId;
+        _ = appId;
+        _ = fullName;
+        _ = phone;
+        _ = photoUrl;
+        _ = cancellationToken;
+        return Task.FromResult(false);
     }
 
     public async Task<Dictionary<string, string>> GetChatUserSettingsAsync(

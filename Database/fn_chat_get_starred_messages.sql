@@ -1,4 +1,4 @@
--- Soft FY: do not filter by fiscal_year_id at all (org+app+user only).
+﻿-- Soft FY: do not filter by fiscal_year_id at all (org+app+user only).
 
 DROP FUNCTION IF EXISTS public.fn_chat_get_starred_messages(bigint, integer, integer, integer);
 
@@ -41,7 +41,7 @@ STABLE
 SECURITY INVOKER
 AS $fn$
 BEGIN
-    IF p_user_id IS NULL OR p_org_id IS NULL OR p_app_id IS NULL THEN
+    IF p_user_id IS NULL OR p_user_id <= 0 OR p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_get_starred_messages: user_id, org_id and app_id are required'
             USING ERRCODE = '22023';
     END IF;

@@ -1,5 +1,5 @@
--- Synced from live DB. Group path is additive; private path preserved.
--- WARNING: re-applying DROP/CREATE may replace live overloads — review before deploy.
+﻿-- Synced from live DB. Group path is additive; private path preserved.
+-- WARNING: re-applying DROP/CREATE may replace live overloads â€” review before deploy.
 
 CREATE OR REPLACE FUNCTION public.fn_chat_get_chat_messages(p_chat_id integer, p_user_id bigint, p_org_id integer, p_app_id integer, p_fiscal_year_id integer)
  RETURNS TABLE(message_id bigint, chat_id integer, sender_user_id bigint, receiver_user_id bigint, message_body text, message_type_id smallint, type_name character varying, parent_message_id bigint, sent_at timestamp with time zone, read_at timestamp with time zone, created_at timestamp with time zone, updated_at timestamp with time zone, attachment_path_1 text, attachment_path_2 text, attachment_path_3 text, attachment_path_4 text, attachment_path_5 text, is_starred_by_sender boolean, starred_by_sender_at timestamp with time zone, is_starred_by_receiver boolean, starred_by_receiver_at timestamp with time zone, forwarded_from_message_id bigint, forwarded_by bigint, my_reaction_code character varying, my_reaction character varying, peer_reaction_code character varying, peer_reaction character varying, group_id bigint)
@@ -11,9 +11,9 @@ DECLARE
 BEGIN
     IF p_chat_id IS NULL
        OR p_user_id IS NULL
-       OR p_org_id IS NULL
-       OR p_app_id IS NULL
-       OR p_fiscal_year_id IS NULL THEN
+       OR p_org_id IS NULL OR p_org_id <= 0
+       OR p_app_id IS NULL OR p_app_id <= 0
+       OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_get_chat_messages: required parameters cannot be null'
             USING ERRCODE = '22023';
     END IF;

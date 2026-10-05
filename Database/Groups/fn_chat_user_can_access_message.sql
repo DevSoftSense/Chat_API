@@ -7,6 +7,10 @@ CREATE OR REPLACE FUNCTION public.fn_chat_user_can_access_message(p_message tab_
  STABLE
 AS $function$
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'orgId and appId are required' USING ERRCODE = '22023';
+    END IF;
+
     IF p_message.sender_user_id IS NOT DISTINCT FROM p_user_id
        OR p_message.receiver_user_id IS NOT DISTINCT FROM p_user_id THEN
         RETURN true;

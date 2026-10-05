@@ -13,6 +13,10 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'orgId and appId are required' USING ERRCODE = '22023';
+    END IF;
+
     RETURN QUERY
     SELECT
         (
@@ -72,6 +76,10 @@ RETURNS TABLE (unread_count INTEGER)
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'orgId and appId are required' USING ERRCODE = '22023';
+    END IF;
+
     RETURN QUERY
     SELECT COALESCE(s.unread_by_me, 0)::INTEGER AS unread_count
     FROM public.fn_chat_announcement_get_stats(p_user_id, p_org_id, p_app_id) s;

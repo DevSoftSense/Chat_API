@@ -1,5 +1,5 @@
--- Synced from live DB (SOC_SaaS_Product). Do not recreate tables.
--- DAY 1 Group Chat — additive; One-to-One paths unchanged.
+﻿-- Synced from live DB (SOC_SaaS_Product). Do not recreate tables.
+-- DAY 1 Group Chat â€” additive; One-to-One paths unchanged.
 
 CREATE OR REPLACE FUNCTION public.fn_chat_add_group_members(p_group_id bigint, p_member_user_ids bigint[], p_requesting_user_id bigint, p_org_id integer, p_app_id integer, p_fiscal_year_id integer)
  RETURNS TABLE(group_id bigint, user_id integer, is_admin boolean, joined_at timestamp with time zone, is_active boolean, reactivated boolean)
@@ -12,7 +12,7 @@ DECLARE
 BEGIN
     IF p_group_id IS NULL OR p_group_id <= 0
        OR p_requesting_user_id IS NULL OR p_requesting_user_id <= 0
-       OR p_org_id IS NULL OR p_app_id IS NULL OR p_fiscal_year_id IS NULL THEN
+       OR p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_add_group_members: required parameters cannot be null'
             USING ERRCODE = '22023';
     END IF;
@@ -36,7 +36,7 @@ BEGIN
                 USING ERRCODE = '22023';
         END IF;
 
-        -- Already active → skip (no duplicate).
+        -- Already active â†’ skip (no duplicate).
         IF EXISTS (
             SELECT 1
             FROM public.tab_group_members m

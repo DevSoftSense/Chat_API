@@ -55,6 +55,10 @@ DECLARE
     v_location VARCHAR(255);
     v_is_important BOOLEAN;
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'orgId and appId are required' USING ERRCODE = '22023';
+    END IF;
+
     SELECT a.posted_by, a.fiscal_year_id, a.status_name, a.is_important
     INTO v_posted_by, v_fiscal, v_status_name, v_is_important
     FROM public.tab_announcements a
@@ -88,14 +92,7 @@ BEGIN
         ELSE NULL
     END;
 
-    IF v_department_id IS NULL AND NULLIF(TRIM(COALESCE(p_department_name, '')), '') IS NOT NULL THEN
-        SELECT d.department_id::BIGINT
-        INTO v_department_id
-        FROM public.tab_department_master d
-        WHERE LOWER(TRIM(d.department_name)) = LOWER(TRIM(p_department_name))
-        ORDER BY d.department_id
-        LIMIT 1;
-    END IF;
+    -- SoftOnCloud owns HR department masters — do not look up tab_department_master.
 
     IF p_expiry_date IS NOT NULL AND p_expiry_date < NOW() THEN
         v_status_name := 'Expired';

@@ -20,6 +20,10 @@ DECLARE
     v_posted_by BIGINT;
     v_delete_at TIMESTAMPTZ;
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'orgId and appId are required' USING ERRCODE = '22023';
+    END IF;
+
     SELECT a.posted_by INTO v_posted_by
     FROM public.tab_announcements a
     WHERE a.announcement_id = p_announcement_id

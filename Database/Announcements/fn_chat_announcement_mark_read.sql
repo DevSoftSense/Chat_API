@@ -18,6 +18,10 @@ DECLARE
     v_read_at TIMESTAMPTZ;
     v_fiscal INTEGER;
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'orgId and appId are required' USING ERRCODE = '22023';
+    END IF;
+
     SELECT EXISTS (
         SELECT 1 FROM public.tab_announcements a
         WHERE a.announcement_id = p_announcement_id

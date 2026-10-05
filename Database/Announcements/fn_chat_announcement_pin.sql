@@ -23,6 +23,10 @@ DECLARE
     v_posted_by BIGINT;
     v_is_pinned BOOLEAN;
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'orgId and appId are required' USING ERRCODE = '22023';
+    END IF;
+
     SELECT a.posted_by
     INTO v_posted_by
     FROM public.tab_announcements a
@@ -66,6 +70,10 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'orgId and appId are required' USING ERRCODE = '22023';
+    END IF;
+
     RETURN QUERY
     SELECT r.result_announcement_id, r.result_is_pinned
     FROM public.fn_chat_announcement_pin(

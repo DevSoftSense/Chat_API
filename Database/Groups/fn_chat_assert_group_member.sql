@@ -6,6 +6,10 @@ CREATE OR REPLACE FUNCTION public.fn_chat_assert_group_member(p_group_id bigint,
  LANGUAGE plpgsql
 AS $function$
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'orgId and appId are required' USING ERRCODE = '22023';
+    END IF;
+
     IF NOT EXISTS (
         SELECT 1
         FROM public.tab_groups g

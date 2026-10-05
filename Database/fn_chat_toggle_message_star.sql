@@ -1,4 +1,4 @@
--- FIX: Group Star for any active member (demo user starring KK's group message).
+﻿-- FIX: Group Star for any active member (demo user starring KK's group message).
 -- Apply this in DBeaver / Postgres NOW, then retry Star in UI.
 -- One-to-One path unchanged.
 
@@ -35,9 +35,9 @@ BEGIN
     IF p_message_id IS NULL
        OR p_user_id IS NULL
        OR p_is_starred IS NULL
-       OR p_org_id IS NULL
-       OR p_app_id IS NULL
-       OR p_fiscal_year_id IS NULL THEN
+       OR p_org_id IS NULL OR p_org_id <= 0
+       OR p_app_id IS NULL OR p_app_id <= 0
+       OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_toggle_message_star: required parameters cannot be null'
             USING ERRCODE = '22023';
     END IF;
@@ -78,7 +78,7 @@ BEGIN
         LIMIT 1;
     END IF;
 
-    -- ─── GROUP PATH ──────────────────────────────────────────────────────────
+    -- â”€â”€â”€ GROUP PATH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     IF v_group_id IS NOT NULL THEN
         SELECT EXISTS (
             SELECT 1
@@ -143,7 +143,7 @@ BEGIN
         RETURN;
     END IF;
 
-    -- ─── ONE-TO-ONE PATH (unchanged) ─────────────────────────────────────────
+    -- â”€â”€â”€ ONE-TO-ONE PATH (unchanged) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     IF v_msg.sender_user_id IS NOT DISTINCT FROM p_user_id THEN
         v_is_sender := true;
     ELSIF v_msg.receiver_user_id IS NOT DISTINCT FROM p_user_id THEN

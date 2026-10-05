@@ -1,5 +1,5 @@
--- Synced from live DB (SOC_SaaS_Product). Do not recreate tables.
--- DAY 1 Group Chat — additive; One-to-One paths unchanged.
+﻿-- Synced from live DB (SOC_SaaS_Product). Do not recreate tables.
+-- DAY 1 Group Chat â€” additive; One-to-One paths unchanged.
 
 CREATE OR REPLACE FUNCTION public.fn_chat_create_group(p_group_name character varying, p_group_code character varying, p_description character varying, p_created_by bigint, p_org_id integer, p_app_id integer, p_fiscal_year_id integer, p_member_user_ids bigint[] DEFAULT NULL::bigint[])
  RETURNS TABLE(group_id bigint, chat_id integer, group_name character varying, group_code character varying, description character varying, created_by integer, created_at timestamp with time zone, is_active boolean, is_admin boolean)
@@ -15,7 +15,7 @@ DECLARE
     v_member_id bigint;
 BEGIN
     IF p_created_by IS NULL OR p_created_by <= 0
-       OR p_org_id IS NULL OR p_app_id IS NULL OR p_fiscal_year_id IS NULL THEN
+       OR p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_create_group: required parameters cannot be null'
             USING ERRCODE = '22023';
     END IF;

@@ -34,6 +34,9 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'orgId and appId are required' USING ERRCODE = '22023';
+    END IF;
     IF p_announcement_id IS NULL OR p_announcement_id <= 0 THEN
         RAISE EXCEPTION 'announcementId is required' USING ERRCODE = '22023';
     END IF;

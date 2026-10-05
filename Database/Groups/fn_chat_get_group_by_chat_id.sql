@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.fn_chat_get_group_by_chat_id(p_chat_id integer
 AS $function$
 BEGIN
     IF p_chat_id IS NULL OR p_chat_id <= 0
-       OR p_org_id IS NULL OR p_app_id IS NULL OR p_fiscal_year_id IS NULL THEN
+       OR p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_get_group_by_chat_id: required parameters cannot be null'
             USING ERRCODE = '22023';
     END IF;

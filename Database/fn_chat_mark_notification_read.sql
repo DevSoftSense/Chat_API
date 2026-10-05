@@ -32,6 +32,11 @@ AS $fn$
 DECLARE
     v_unread integer;
 BEGIN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 THEN
+        RAISE EXCEPTION 'fn_chat_mark_notification_read: org_id and app_id are required'
+            USING ERRCODE = '22023';
+    END IF;
+
     IF p_notification_id IS NULL OR p_notification_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_mark_notification_read: notification_id is required'
             USING ERRCODE = '22023';

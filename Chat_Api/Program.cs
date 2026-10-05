@@ -128,15 +128,22 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// ─── CORS ─────────────────────────────────────────────────────────────────────
+// ─── CORS (UI origins that call https://chatapi.softoncloud.com) ───────────────
+var chatCorsOrigins = new[]
+{
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://chat.softoncloud.com",
+    "http://chat.softoncloud.com",
+    "https://www.chat.softoncloud.com",
+    "http://www.chat.softoncloud.com"
+};
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("ChatCors", policy =>
     {
-        policy.WithOrigins(
-                "http://localhost:3000",
-                "http://localhost:5173"
-            )
+        policy.WithOrigins(chatCorsOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -165,10 +172,11 @@ app.UseStaticFiles(new StaticFileOptions
             return;
 
         var origin = ctx.Context.Request.Headers.Origin.ToString();
-        if (origin is "http://localhost:3000" or "http://localhost:5173")
+        if (chatCorsOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
         {
             ctx.Context.Response.Headers.Append("Access-Control-Allow-Origin", origin);
             ctx.Context.Response.Headers.Append("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+            ctx.Context.Response.Headers.Append("Access-Control-Allow-Credentials", "true");
             ctx.Context.Response.Headers.Append("Vary", "Origin");
         }
     }

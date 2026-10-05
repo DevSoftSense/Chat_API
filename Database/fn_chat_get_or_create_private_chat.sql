@@ -1,4 +1,4 @@
--- Uses existing public.tab_messages only. Does NOT create/alter tables.
+﻿-- Uses existing public.tab_messages only. Does NOT create/alter tables.
 -- Empty private chats are anchored with a draft placeholder row (is_draft=true),
 -- which fn_chat_get_chat_messages excludes.
 
@@ -23,7 +23,7 @@ DECLARE
 BEGIN
     IF p_user1_id IS NULL
        OR p_user2_id IS NULL
-       OR p_org_id IS NULL
+       OR p_org_id IS NULL OR p_org_id <= 0
        OR p_app_id IS NULL THEN
         RAISE EXCEPTION 'fn_chat_get_or_create_private_chat: required parameters cannot be null'
             USING ERRCODE = '22023';
@@ -67,7 +67,7 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Same id space as groups — avoid colliding with tab_groups.chat_id.
+    -- Same id space as groups â€” avoid colliding with tab_groups.chat_id.
     SELECT COALESCE(MAX(m.chat_id), 0) + 1
     INTO v_chat_id
     FROM public.tab_messages m;

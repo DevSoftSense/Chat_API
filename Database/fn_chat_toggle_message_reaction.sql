@@ -1,5 +1,5 @@
--- Synced from live DB. Group path is additive; private path preserved.
--- WARNING: re-applying DROP/CREATE may replace live overloads — review before deploy.
+﻿-- Synced from live DB. Group path is additive; private path preserved.
+-- WARNING: re-applying DROP/CREATE may replace live overloads â€” review before deploy.
 
 DROP FUNCTION IF EXISTS public.fn_chat_toggle_message_reaction(bigint, bigint, character varying, integer, integer, integer);
 
@@ -19,15 +19,15 @@ DECLARE
     v_out_reaction_emoji character varying(30);
     v_out_reacted_on timestamptz;
 BEGIN
-    IF p_message_id IS NULL OR p_user_id IS NULL OR p_app_id IS NULL OR p_org_id IS NULL OR p_fiscal_year_id IS NULL THEN
+    IF p_message_id IS NULL OR p_user_id IS NULL OR p_app_id IS NULL OR p_app_id <= 0 OR p_org_id IS NULL OR p_org_id <= 0 OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_toggle_message_reaction: required parameters cannot be null' USING ERRCODE = '22023';
     END IF;
 
     v_code := upper(NULLIF(btrim(COALESCE(p_reaction_code, '')), ''));
     IF v_code IS NOT NULL THEN
         v_emoji := CASE v_code
-            WHEN 'LIKE' THEN '👍' WHEN 'LOVE' THEN '❤️' WHEN 'LAUGH' THEN '😂'
-            WHEN 'WOW' THEN '😮' WHEN 'SAD' THEN '😢' WHEN 'THANKS' THEN '🙏' ELSE NULL END;
+            WHEN 'LIKE' THEN 'ðŸ‘' WHEN 'LOVE' THEN 'â¤ï¸' WHEN 'LAUGH' THEN 'ðŸ˜‚'
+            WHEN 'WOW' THEN 'ðŸ˜®' WHEN 'SAD' THEN 'ðŸ˜¢' WHEN 'THANKS' THEN 'ðŸ™' ELSE NULL END;
         IF v_emoji IS NULL THEN
             RAISE EXCEPTION 'fn_chat_toggle_message_reaction: invalid reaction_code "%". Allowed: LIKE, LOVE, LAUGH, WOW, SAD, THANKS', p_reaction_code USING ERRCODE = '22023';
         END IF;

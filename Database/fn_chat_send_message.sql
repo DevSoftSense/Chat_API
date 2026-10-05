@@ -1,5 +1,5 @@
--- Synced from live DB. Group path is additive; private path preserved.
--- WARNING: re-applying DROP/CREATE may replace live overloads — review before deploy.
+﻿-- Synced from live DB. Group path is additive; private path preserved.
+-- WARNING: re-applying DROP/CREATE may replace live overloads â€” review before deploy.
 
 CREATE OR REPLACE FUNCTION public.fn_chat_send_message(p_chat_id integer, p_sender_user_id bigint, p_receiver_user_id bigint, p_message_body text, p_message_type_id smallint, p_org_id integer, p_app_id integer, p_fiscal_year_id integer, p_attachment_path_1 text DEFAULT NULL::text, p_attachment_path_2 text DEFAULT NULL::text, p_attachment_path_3 text DEFAULT NULL::text, p_attachment_path_4 text DEFAULT NULL::text, p_attachment_path_5 text DEFAULT NULL::text, p_group_id bigint DEFAULT NULL::bigint)
  RETURNS TABLE(message_id bigint, chat_id integer, sender_user_id bigint, receiver_user_id bigint, message_body text, message_type_id smallint, sent_at timestamp with time zone, created_at timestamp with time zone, attachment_path_1 text, attachment_path_2 text, attachment_path_3 text, attachment_path_4 text, attachment_path_5 text, group_id bigint)
@@ -23,9 +23,9 @@ BEGIN
     IF p_chat_id IS NULL
        OR p_sender_user_id IS NULL
        OR p_message_type_id IS NULL
-       OR p_org_id IS NULL
-       OR p_app_id IS NULL
-       OR p_fiscal_year_id IS NULL THEN
+       OR p_org_id IS NULL OR p_org_id <= 0
+       OR p_app_id IS NULL OR p_app_id <= 0
+       OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_send_message: required parameters cannot be null'
             USING ERRCODE = '22023';
     END IF;
@@ -83,7 +83,7 @@ BEGIN
     END IF;
 
     IF v_group_id IS NOT NULL THEN
-        -- ── GROUP PATH ───────────────────────────────────────────────────────
+        -- â”€â”€ GROUP PATH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         SELECT g.chat_id
         INTO v_group_chat_id
         FROM public.tab_groups g
@@ -180,7 +180,7 @@ BEGIN
         RETURN;
     END IF;
 
-    -- ── PRIVATE 1:1 PATH (unchanged rules) ───────────────────────────────────
+    -- â”€â”€ PRIVATE 1:1 PATH (unchanged rules) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     IF p_receiver_user_id IS NULL THEN
         RAISE EXCEPTION 'fn_chat_send_message: receiver_user_id is required for private chat'
             USING ERRCODE = '22023';
@@ -304,7 +304,7 @@ END;
 $function$
 
 
--- Group Message Info receipts (merged here — no separate SQL file).
+-- Group Message Info receipts (merged here â€” no separate SQL file).
 CREATE TABLE IF NOT EXISTS public.tab_message_receipts (
     receipt_id      bigserial PRIMARY KEY,
     message_id      bigint NOT NULL,
@@ -353,7 +353,7 @@ DECLARE
     v_group_id bigint;
 BEGIN
     IF p_message_id IS NULL OR p_user_id IS NULL
-       OR p_org_id IS NULL OR p_app_id IS NULL OR p_fiscal_year_id IS NULL THEN
+       OR p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_get_message_info: required parameters cannot be null'
             USING ERRCODE = '22023';
     END IF;
@@ -486,7 +486,7 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    IF p_org_id IS NULL OR p_app_id IS NULL OR p_fiscal_year_id IS NULL THEN
+    IF p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_mark_messages_read: org_id, app_id and fiscal_year_id are required'
             USING ERRCODE = '22023';
     END IF;

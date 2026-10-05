@@ -1,0 +1,72 @@
+-- ============================================================
+-- LIVE DB FIX for Chat SoftOnCloud (run on LIVE chat / tenant DB)
+-- Fixes errors on chat.softoncloud.com:
+--   1) column msg.group_id does not exist        (Groups)
+--   2) column a.location does not exist          (Announcements)
+--   3) relation tab_role_master does not exist   (Settings)
+-- How to use: pgAdmin → LIVE DB → paste ALL → Run
+-- ============================================================
+
+-- 1) Groups: tab_messages.group_id
+ALTER TABLE public.tab_messages
+  ADD COLUMN IF NOT EXISTS group_id bigint NULL;
+
+CREATE INDEX IF NOT EXISTS ix_tab_messages_group_id
+  ON public.tab_messages (group_id)
+  WHERE group_id IS NOT NULL;
+
+UPDATE public.tab_messages m
+SET group_id = g.group_id
+FROM public.tab_groups g
+WHERE m.chat_id = g.chat_id
+  AND m.group_id IS NULL
+  AND COALESCE(g.is_deleted, false) = false;
+
+-- 2) Announcements: location (+ related)
+ALTER TABLE public.tab_announcements
+  ADD COLUMN IF NOT EXISTS location varchar(255) NULL;
+
+ALTER TABLE public.tab_announcements
+  ADD COLUMN IF NOT EXISTS is_important boolean NOT NULL DEFAULT false;
+
+ALTER TABLE public.tab_announcements
+  ADD COLUMN IF NOT EXISTS is_pinned boolean NOT NULL DEFAULT false;
+
+-- 3) Settings stub (optional if API redeployed with code fix)
+CREATE TABLE IF NOT EXISTS public.tab_role_master (
+    role_id    integer NOT NULL,
+    org_id     integer NOT NULL,
+    app_id     integer NOT NULL,
+    role_name  varchar(255) NULL,
+    is_active  boolean DEFAULT true,
+    is_deleted boolean DEFAULT false,
+    PRIMARY KEY (role_id, org_id, app_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.tab_user_role (
+    user_id   integer NOT NULL,
+    role_id   integer NOT NULL,
+    org_id    integer NOT NULL,
+    app_id    integer NOT NULL,
+    is_active integer DEFAULT 1,
+    PRIMARY KEY (user_id, role_id, org_id, app_id)
+);
+
+-- Verify
+SELECT 'tab_messages.group_id' AS check_item,
+       EXISTS (
+         SELECT 1 FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='tab_messages' AND column_name='group_id'
+       ) AS ok
+UNION ALL
+SELECT 'tab_announcements.location',
+       EXISTS (
+         SELECT 1 FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='tab_announcements' AND column_name='location'
+       )
+UNION ALL
+SELECT 'tab_role_master',
+       EXISTS (
+         SELECT 1 FROM information_schema.tables
+         WHERE table_schema='public' AND table_name='tab_role_master'
+       );

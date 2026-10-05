@@ -376,78 +376,14 @@ public sealed class DashboardRepository : IDashboardRepository
         long userId, int orgId, int appId,
         CancellationToken cancellationToken)
     {
-        const string sql = @"
-SELECT
-    e.user_id,
-    COALESCE(e.full_name, '') AS full_name,
-    COALESCE(e.email, '') AS email,
-    COALESCE(e.phone, '') AS phone,
-    e.photo_url,
-    COALESCE(
-        NULLIF(TRIM(erm.role_name), ''),
-        NULLIF(TRIM(rm.role_name), ''),
-        ''
-    ) AS role_name,
-    COALESCE(NULLIF(TRIM(d.department_name), ''), '') AS department_name,
-    COALESCE(NULLIF(TRIM(b.timezone), ''), '') AS timezone
-FROM public.tab_employee_master e
-LEFT JOIN public.tab_employee_role_master erm
-    ON erm.staff_role_id = e.staff_role_id
-   AND erm.org_id = e.org_id
-   AND erm.app_id = e.app_id
-LEFT JOIN public.tab_user_role ur
-    ON ur.user_id = e.user_id
-   AND ur.org_id = e.org_id
-   AND ur.app_id = e.app_id
-   AND COALESCE(ur.is_active, 1) = 1
-LEFT JOIN public.tab_role_master rm
-    ON rm.role_id = ur.role_id
-   AND rm.org_id = ur.org_id
-   AND rm.app_id = ur.app_id
-   AND COALESCE(rm.is_active, true) = true
-   AND COALESCE(rm.is_deleted, false) = false
-LEFT JOIN public.tab_department_master d
-    ON d.department_id = e.department_id
-   AND d.org_id = e.org_id
-   AND d.app_id = e.app_id
-LEFT JOIN public.tab_branch_master b
-    ON b.branch_id = e.branch_id
-   AND b.org_id = e.org_id
-   AND b.app_id = e.app_id
-WHERE e.user_id = @p_user_id
-  AND e.org_id = @p_org_id
-  AND (e.app_id = @p_app_id OR e.app_id IS NULL)
-ORDER BY CASE WHEN e.app_id = @p_app_id THEN 0 ELSE 1 END, e.employee_id ASC
-LIMIT 1;";
-
-        await using var command = new NpgsqlCommand(sql, connection)
-        {
-            CommandTimeout = _databaseHelper.CommandTimeoutSeconds
-        };
-        command.Parameters.AddWithValue("p_user_id", (int)userId);
-        command.Parameters.AddWithValue("p_org_id", orgId);
-        command.Parameters.AddWithValue("p_app_id", appId);
-
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken)
-            .ConfigureAwait(false);
-        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            return new DashboardProfileDto { UserId = userId };
-        }
-
-        return new DashboardProfileDto
-        {
-            UserId = Convert.ToInt64(reader.GetValue(reader.GetOrdinal("user_id"))),
-            FullName = reader.GetString(reader.GetOrdinal("full_name")),
-            Email = reader.GetString(reader.GetOrdinal("email")),
-            Phone = reader.GetString(reader.GetOrdinal("phone")),
-            PhotoUrl = reader.IsDBNull(reader.GetOrdinal("photo_url"))
-                ? null
-                : reader.GetString(reader.GetOrdinal("photo_url")),
-            Role = reader.GetString(reader.GetOrdinal("role_name")),
-            Department = reader.GetString(reader.GetOrdinal("department_name")),
-            Timezone = reader.GetString(reader.GetOrdinal("timezone"))
-        };
+        // SoftOnCloud owns profile / employee / role / branch data.
+        // UI fills FullName / Role / Department / Photo from SoftOnCloud APIs.
+        _ = connection;
+        _ = orgId;
+        _ = appId;
+        _ = cancellationToken;
+        await Task.CompletedTask.ConfigureAwait(false);
+        return new DashboardProfileDto { UserId = userId, Timezone = "UTC" };
     }
 
     private async Task<IReadOnlyList<DashboardRecentMessageDto>> LoadRecentMessagesAsync(
@@ -462,8 +398,8 @@ FROM (
         m.message_id,
         m.chat_id::bigint AS chat_id,
         m.sender_user_id::bigint AS sender_user_id,
-        COALESCE(NULLIF(TRIM(e.full_name), ''), 'User ' || m.sender_user_id::text) AS sender_name,
-        e.photo_url AS sender_photo_url,
+        ('User ' || m.sender_user_id::text) AS sender_name,
+        NULL::text AS sender_photo_url,
         COALESCE(m.message_body, '') AS preview,
         m.sent_at,
         (m.read_at IS NULL) AS is_unread,
@@ -471,10 +407,6 @@ FROM (
         NULL::bigint AS group_id,
         NULL::text AS group_name
     FROM public.tab_messages m
-    LEFT JOIN public.tab_employee_master e
-        ON e.user_id = m.sender_user_id
-       AND e.org_id = m.org_id
-       AND (e.app_id = m.app_id OR e.app_id IS NULL)
     WHERE m.receiver_user_id = @p_user_id
       AND m.sender_user_id IS DISTINCT FROM @p_user_id
       AND m.group_id IS NULL
@@ -492,8 +424,8 @@ FROM (
         m.message_id,
         m.chat_id::bigint AS chat_id,
         m.sender_user_id::bigint AS sender_user_id,
-        COALESCE(NULLIF(TRIM(e.full_name), ''), 'User ' || m.sender_user_id::text) AS sender_name,
-        e.photo_url AS sender_photo_url,
+        ('User ' || m.sender_user_id::text) AS sender_name,
+        NULL::text AS sender_photo_url,
         COALESCE(m.message_body, '') AS preview,
         m.sent_at,
         NOT EXISTS (
@@ -513,10 +445,6 @@ FROM (
        AND gm.left_at IS NULL
     LEFT JOIN public.tab_groups g
         ON g.group_id = m.group_id
-    LEFT JOIN public.tab_employee_master e
-        ON e.user_id = m.sender_user_id
-       AND e.org_id = m.org_id
-       AND (e.app_id = m.app_id OR e.app_id IS NULL)
     WHERE m.group_id IS NOT NULL
       AND m.sender_user_id IS DISTINCT FROM @p_user_id
       AND m.org_id = @p_org_id
@@ -582,8 +510,8 @@ FROM (
         m.message_id,
         m.chat_id::bigint AS chat_id,
         m.sender_user_id::bigint AS display_user_id,
-        COALESCE(NULLIF(TRIM(e.full_name), ''), 'User ' || m.sender_user_id::text) AS display_name,
-        e.photo_url AS display_photo_url,
+        'User ' || m.sender_user_id::text AS display_name,
+        NULL::text AS display_photo_url,
         COALESCE(m.message_body, '') AS preview,
         m.sent_at,
         false AS is_outgoing,
@@ -591,10 +519,6 @@ FROM (
         NULL::bigint AS group_id,
         NULL::text AS group_name
     FROM public.tab_messages m
-    LEFT JOIN public.tab_employee_master e
-        ON e.user_id = m.sender_user_id
-       AND e.org_id = m.org_id
-       AND (e.app_id = m.app_id OR e.app_id IS NULL)
     WHERE m.receiver_user_id = @p_user_id
       AND m.sender_user_id IS DISTINCT FROM @p_user_id
       AND m.group_id IS NULL
@@ -618,8 +542,8 @@ FROM (
         m.message_id,
         m.chat_id::bigint AS chat_id,
         m.sender_user_id::bigint AS display_user_id,
-        COALESCE(NULLIF(TRIM(e.full_name), ''), 'User ' || m.sender_user_id::text) AS display_name,
-        e.photo_url AS display_photo_url,
+        'User ' || m.sender_user_id::text AS display_name,
+        NULL::text AS display_photo_url,
         COALESCE(m.message_body, '') AS preview,
         m.sent_at,
         false AS is_outgoing,
@@ -635,10 +559,6 @@ FROM (
        AND gm.app_id = @p_app_id
     LEFT JOIN public.tab_groups g
         ON g.group_id = m.group_id
-    LEFT JOIN public.tab_employee_master e
-        ON e.user_id = m.sender_user_id
-       AND e.org_id = m.org_id
-       AND (e.app_id = m.app_id OR e.app_id IS NULL)
     WHERE m.group_id IS NOT NULL
       AND m.sender_user_id IS DISTINCT FROM @p_user_id
       AND m.org_id = @p_org_id
@@ -666,8 +586,8 @@ FROM (
         m.message_id,
         m.chat_id::bigint AS chat_id,
         m.receiver_user_id::bigint AS display_user_id,
-        COALESCE(NULLIF(TRIM(e.full_name), ''), 'User ' || m.receiver_user_id::text) AS display_name,
-        e.photo_url AS display_photo_url,
+        ('User ' || m.receiver_user_id::text) AS display_name,
+        NULL::text AS display_photo_url,
         COALESCE(m.message_body, '') AS preview,
         m.sent_at,
         true AS is_outgoing,
@@ -675,10 +595,6 @@ FROM (
         NULL::bigint AS group_id,
         NULL::text AS group_name
     FROM public.tab_messages m
-    LEFT JOIN public.tab_employee_master e
-        ON e.user_id = m.receiver_user_id
-       AND e.org_id = m.org_id
-       AND (e.app_id = m.app_id OR e.app_id IS NULL)
     WHERE m.sender_user_id = @p_user_id
       AND m.receiver_user_id IS NOT NULL
       AND m.group_id IS NULL
@@ -702,8 +618,8 @@ FROM (
         m.message_id,
         m.chat_id::bigint AS chat_id,
         gm.user_id::bigint AS display_user_id,
-        COALESCE(NULLIF(TRIM(e.full_name), ''), 'User ' || gm.user_id::text) AS display_name,
-        e.photo_url AS display_photo_url,
+        'User ' || gm.user_id::text AS display_name,
+        NULL::text AS display_photo_url,
         COALESCE(m.message_body, '') AS preview,
         m.sent_at,
         true AS is_outgoing,
@@ -727,10 +643,6 @@ FROM (
     ) r ON TRUE
     LEFT JOIN public.tab_groups g
         ON g.group_id = m.group_id
-    LEFT JOIN public.tab_employee_master e
-        ON e.user_id = gm.user_id
-       AND e.org_id = m.org_id
-       AND (e.app_id = m.app_id OR e.app_id IS NULL)
     WHERE m.group_id IS NOT NULL
       AND m.sender_user_id = @p_user_id
       AND m.org_id = @p_org_id
@@ -800,11 +712,11 @@ SELECT
     m.receiver_user_id::bigint AS recipient_user_id,
     CASE
         WHEN m.group_id IS NOT NULL THEN COALESCE(g.group_name, 'Group')
-        ELSE COALESCE(NULLIF(TRIM(e.full_name), ''), 'User ' || COALESCE(m.receiver_user_id::text, ''))
+        ELSE 'User ' || COALESCE(m.receiver_user_id::text, '')
     END AS recipient_name,
     CASE
         WHEN m.group_id IS NOT NULL THEN g.profile_pic
-        ELSE e.photo_url
+        ELSE NULL::text
     END AS recipient_photo_url,
     COALESCE(m.message_body, '') AS preview,
     m.sent_at,
@@ -814,10 +726,6 @@ SELECT
 FROM public.tab_messages m
 LEFT JOIN public.tab_groups g
     ON g.group_id = m.group_id
-LEFT JOIN public.tab_employee_master e
-    ON e.user_id = m.receiver_user_id
-   AND e.org_id = m.org_id
-   AND (e.app_id = m.app_id OR e.app_id IS NULL)
 WHERE m.sender_user_id = @p_user_id
   AND m.org_id = @p_org_id
   AND m.app_id = @p_app_id
@@ -885,11 +793,11 @@ SELECT
     m.receiver_user_id::bigint AS recipient_user_id,
     CASE
         WHEN m.group_id IS NOT NULL THEN COALESCE(g.group_name, 'Group')
-        ELSE COALESCE(NULLIF(TRIM(e.full_name), ''), 'User ' || COALESCE(m.receiver_user_id::text, ''))
+        ELSE 'User ' || COALESCE(m.receiver_user_id::text, '')
     END AS recipient_name,
     CASE
         WHEN m.group_id IS NOT NULL THEN g.profile_pic
-        ELSE e.photo_url
+        ELSE NULL::text
     END AS recipient_photo_url,
     COALESCE(m.message_body, '') AS preview,
     m.sent_at,
@@ -915,10 +823,6 @@ SELECT
 FROM public.tab_messages m
 LEFT JOIN public.tab_groups g
     ON g.group_id = m.group_id
-LEFT JOIN public.tab_employee_master e
-    ON e.user_id = m.receiver_user_id
-   AND e.org_id = m.org_id
-   AND (e.app_id = m.app_id OR e.app_id IS NULL)
 WHERE m.sender_user_id = @p_user_id
   AND m.org_id = @p_org_id
   AND m.app_id = @p_app_id
@@ -976,17 +880,13 @@ LIMIT 5;";
     {
         const string sql = @"
 SELECT
-    COALESCE(NULLIF(TRIM(d.department_name), ''), 'Other') AS department,
+    'Other'::text AS department,
     COUNT(*)::integer AS message_count
 FROM public.tab_messages m
 LEFT JOIN public.tab_employee_master e
     ON e.user_id::bigint = m.sender_user_id
    AND e.org_id = m.org_id
    AND (e.app_id = m.app_id OR e.app_id IS NULL)
-LEFT JOIN public.tab_department_master d
-    ON d.department_id = e.department_id
-   AND d.org_id = m.org_id
-   AND (d.app_id = m.app_id OR d.app_id IS NULL OR d.app_id = e.app_id)
 WHERE m.org_id = @p_org_id
   AND m.app_id = @p_app_id
   AND (
@@ -1043,7 +943,7 @@ SELECT
     COALESCE(a.title, '') AS title,
     COALESCE(a.description, '') AS description,
     c.category_name,
-    COALESCE(NULLIF(TRIM(d.department_name), ''), '') AS department_name,
+    COALESCE(NULLIF(TRIM(a.department_name), ''), '') AS department_name,
     CASE
         WHEN a.expires_at IS NOT NULL AND a.expires_at < NOW() THEN 3
         WHEN a.expires_at IS NOT NULL AND a.expires_at <= (NOW() + INTERVAL '7 days') THEN 2
@@ -1059,20 +959,12 @@ SELECT
     COALESCE(a.is_important, false) AS is_important,
     COALESCE(a.is_pinned, false) AS is_pinned,
     COALESCE(a.posted_by, 0)::bigint AS posted_by,
-    COALESCE(NULLIF(TRIM(e.full_name), ''), '') AS posted_by_name
+    '' AS posted_by_name
 FROM public.tab_announcements a
 LEFT JOIN public.tab_announcement_category_master c
     ON c.category_id = a.category_id
    AND c.org_id = a.org_id
    AND c.app_id = a.app_id
-LEFT JOIN public.tab_department_master d
-    ON d.department_id = a.department_id
-   AND d.org_id = a.org_id
-   AND d.app_id = a.app_id
-LEFT JOIN public.tab_employee_master e
-    ON e.user_id = a.posted_by
-   AND e.org_id = a.org_id
-   AND (e.app_id = a.app_id OR e.app_id IS NULL)
 WHERE a.org_id = @p_org_id
   AND a.app_id = @p_app_id
   AND (a.fiscal_year_id IS NOT DISTINCT FROM @p_fiscal_year_id OR @p_fiscal_year_id IS NULL)
@@ -1143,7 +1035,7 @@ SELECT
     COALESCE(a.title, '') AS title,
     COALESCE(a.description, '') AS description,
     c.category_name,
-    COALESCE(NULLIF(TRIM(d.department_name), ''), '') AS department_name,
+    COALESCE(NULLIF(TRIM(a.department_name), ''), '') AS department_name,
     CASE
         WHEN a.expires_at IS NOT NULL AND a.expires_at < NOW() THEN 3
         WHEN a.expires_at IS NOT NULL AND a.expires_at <= (NOW() + INTERVAL '7 days') THEN 2
@@ -1159,7 +1051,7 @@ SELECT
     COALESCE(a.is_important, false) AS is_important,
     COALESCE(a.is_pinned, false) AS is_pinned,
     COALESCE(a.posted_by, 0)::bigint AS posted_by,
-    COALESCE(NULLIF(TRIM(e.full_name), ''), '') AS posted_by_name
+    '' AS posted_by_name
 FROM public.tab_announcement_recipients r
 INNER JOIN public.tab_announcements a
     ON a.announcement_id = r.announcement_id
@@ -1167,14 +1059,6 @@ LEFT JOIN public.tab_announcement_category_master c
     ON c.category_id = a.category_id
    AND c.org_id = a.org_id
    AND c.app_id = a.app_id
-LEFT JOIN public.tab_department_master d
-    ON d.department_id = a.department_id
-   AND d.org_id = a.org_id
-   AND d.app_id = a.app_id
-LEFT JOIN public.tab_employee_master e
-    ON e.user_id = a.posted_by
-   AND e.org_id = a.org_id
-   AND (e.app_id = a.app_id OR e.app_id IS NULL)
 WHERE r.user_id::bigint = @p_user_id
   AND LOWER(TRIM(COALESCE(r.read_status, ''))) <> 'read'
   AND a.org_id = @p_org_id

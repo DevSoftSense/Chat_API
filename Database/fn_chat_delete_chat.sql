@@ -1,4 +1,4 @@
--- Soft-delete all messages in a chat via delete_flag (no physical DELETE).
+﻿-- Soft-delete all messages in a chat via delete_flag (no physical DELETE).
 -- Same DB mechanism as clear chat; UI removes the chat from the list after success.
 
 DROP FUNCTION IF EXISTS public.fn_chat_delete_chat(integer, bigint, integer, integer, integer);
@@ -27,9 +27,9 @@ DECLARE
 BEGIN
     IF p_chat_id IS NULL
        OR p_user_id IS NULL
-       OR p_org_id IS NULL
-       OR p_app_id IS NULL
-       OR p_fiscal_year_id IS NULL THEN
+       OR p_org_id IS NULL OR p_org_id <= 0
+       OR p_app_id IS NULL OR p_app_id <= 0
+       OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_delete_chat: required parameters cannot be null'
             USING ERRCODE = '22023';
     END IF;

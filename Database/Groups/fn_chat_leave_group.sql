@@ -14,7 +14,7 @@ DECLARE
 BEGIN
     IF p_group_id IS NULL OR p_group_id <= 0
        OR p_user_id IS NULL OR p_user_id <= 0
-       OR p_org_id IS NULL OR p_app_id IS NULL OR p_fiscal_year_id IS NULL THEN
+       OR p_org_id IS NULL OR p_org_id <= 0 OR p_app_id IS NULL OR p_app_id <= 0 OR p_fiscal_year_id IS NULL OR p_fiscal_year_id <= 0 THEN
         RAISE EXCEPTION 'fn_chat_leave_group: required parameters cannot be null'
             USING ERRCODE = '22023';
     END IF;
