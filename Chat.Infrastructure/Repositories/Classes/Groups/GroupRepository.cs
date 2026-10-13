@@ -122,6 +122,173 @@ public sealed class GroupRepository : IGroupRepository
         }
     }
 
+    public async Task<IReadOnlyList<ChatGroupDto>> GetOrganisationGroupsAsync(
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql =
+            @"SELECT g.group_id, g.chat_id, g.group_name, g.group_code, g.description,
+                     g.created_by, g.created_on AS created_at,
+                     (COALESCE(g.is_deleted, false) = false) AS is_active,
+                     g.profile_pic, false AS is_admin, 0 AS unread_count,
+                     (
+                         SELECT COUNT(*)::integer
+                         FROM public.tab_group_members gm
+                         WHERE gm.group_id = g.group_id
+                           AND gm.left_at IS NULL
+                           AND gm.org_id = @p_org_id
+                           AND gm.app_id = @p_app_id
+                           AND gm.fiscal_year_id IS NOT DISTINCT FROM @p_fiscal_year_id
+                     ) AS member_count,
+                     (
+                         SELECT msg.message_body
+                         FROM public.tab_messages msg
+                         WHERE msg.group_id = g.group_id
+                           AND msg.org_id = @p_org_id
+                           AND msg.app_id = @p_app_id
+                           AND msg.fiscal_year_id IS NOT DISTINCT FROM @p_fiscal_year_id
+                           AND COALESCE(msg.delete_flag, 0) = 0
+                           AND msg.deleted_at IS NULL
+                           AND COALESCE(msg.is_draft, false) = false
+                           AND msg.sent_at IS NOT NULL
+                         ORDER BY msg.sent_at DESC, msg.message_id DESC
+                         LIMIT 1
+                     ) AS last_message,
+                     (
+                         SELECT msg.sent_at
+                         FROM public.tab_messages msg
+                         WHERE msg.group_id = g.group_id
+                           AND msg.org_id = @p_org_id
+                           AND msg.app_id = @p_app_id
+                           AND msg.fiscal_year_id IS NOT DISTINCT FROM @p_fiscal_year_id
+                           AND COALESCE(msg.delete_flag, 0) = 0
+                           AND msg.deleted_at IS NULL
+                           AND COALESCE(msg.is_draft, false) = false
+                           AND msg.sent_at IS NOT NULL
+                         ORDER BY msg.sent_at DESC, msg.message_id DESC
+                         LIMIT 1
+                     ) AS last_message_at
+              FROM public.tab_groups g
+              WHERE g.org_id = @p_org_id
+                AND g.app_id = @p_app_id
+                AND g.fiscal_year_id IS NOT DISTINCT FROM @p_fiscal_year_id
+                AND COALESCE(g.is_deleted, false) = false
+              ORDER BY g.created_on DESC, g.group_id DESC;";
+
+        try
+        {
+            return await _databaseHelper.ExecuteRawQueryAsync(
+                sql,
+                command =>
+                {
+                    command.Parameters.AddWithValue("p_org_id", orgId);
+                    command.Parameters.AddWithValue("p_app_id", appId);
+                    command.Parameters.AddWithValue("p_fiscal_year_id", fiscalYearId);
+                },
+                reader => MapChatGroup(reader, includeIsAdmin: true),
+                cancellationToken);
+        }
+        catch (PostgresException ex)
+        {
+            _logger.LogError(ex, "PostgreSQL error in GetOrganisationGroupsAsync");
+            throw new ChatOperationException(ex.MessageText, MapPostgresStatus(ex.SqlState));
+        }
+    }
+
+    public async Task<long?> GetFirstActiveGroupMemberUserIdAsync(
+        long groupId,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        // No joined_at/joined_on — live tab_group_members may not have joined_at.
+        const string sql =
+            @"SELECT gm.user_id::bigint
+              FROM public.tab_group_members gm
+              WHERE gm.group_id = @p_group_id
+                AND gm.left_at IS NULL
+                AND gm.org_id = @p_org_id
+                AND gm.app_id = @p_app_id
+                AND gm.fiscal_year_id IS NOT DISTINCT FROM @p_fiscal_year_id
+              ORDER BY gm.user_id
+              LIMIT 1;";
+
+        try
+        {
+            await using var connection = await _databaseHelper.GetDefaultConnectionAsync(cancellationToken);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new NpgsqlCommand(sql, connection)
+            {
+                CommandTimeout = _databaseHelper.CommandTimeoutSeconds
+            };
+            command.Parameters.AddWithValue("p_group_id", groupId);
+            command.Parameters.AddWithValue("p_org_id", orgId);
+            command.Parameters.AddWithValue("p_app_id", appId);
+            command.Parameters.AddWithValue("p_fiscal_year_id", fiscalYearId);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            if (result is null or DBNull)
+                return null;
+
+            return Convert.ToInt64(result);
+        }
+        catch (PostgresException ex)
+        {
+            _logger.LogError(ex, "PostgreSQL error in GetFirstActiveGroupMemberUserIdAsync");
+            throw new ChatOperationException(ex.MessageText, MapPostgresStatus(ex.SqlState));
+        }
+    }
+
+    public async Task<IReadOnlyList<ChatGroupMemberDto>> GetOrganisationGroupMembersAsync(
+        long groupId,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        // Avoid joined_at — live table uses joined_on; date not required for AUC list.
+        const string sql =
+            @"SELECT gm.user_id::bigint AS user_id,
+                     COALESCE(gm.is_admin, false) AS is_admin
+              FROM public.tab_group_members gm
+              WHERE gm.group_id = @p_group_id
+                AND gm.left_at IS NULL
+                AND gm.org_id = @p_org_id
+                AND gm.app_id = @p_app_id
+                AND gm.fiscal_year_id IS NOT DISTINCT FROM @p_fiscal_year_id
+              ORDER BY COALESCE(gm.is_admin, false) DESC, gm.user_id;";
+
+        try
+        {
+            return await _databaseHelper.ExecuteRawQueryAsync(
+                sql,
+                command =>
+                {
+                    command.Parameters.AddWithValue("p_group_id", groupId);
+                    command.Parameters.AddWithValue("p_org_id", orgId);
+                    command.Parameters.AddWithValue("p_app_id", appId);
+                    command.Parameters.AddWithValue("p_fiscal_year_id", fiscalYearId);
+                },
+                reader => new ChatGroupMemberDto
+                {
+                    UserId = reader.GetInt64(reader.GetOrdinal("user_id")),
+                    IsAdmin = reader.GetBoolean(reader.GetOrdinal("is_admin")),
+                    IsActive = true,
+                    JoinedAt = null
+                },
+                cancellationToken);
+        }
+        catch (PostgresException ex)
+        {
+            _logger.LogError(ex, "PostgreSQL error in GetOrganisationGroupMembersAsync");
+            throw new ChatOperationException(ex.MessageText, MapPostgresStatus(ex.SqlState));
+        }
+    }
+
     public async Task<ChatGroupDetailsDto> GetGroupDetailsAsync(
         long groupId,
         long userId,
@@ -1093,6 +1260,39 @@ public sealed class GroupRepository : IGroupRepository
         catch (IndexOutOfRangeException)
         {
             dto.UnreadCount = 0;
+        }
+
+        try
+        {
+            var memberOrdinal = reader.GetOrdinal("member_count");
+            if (!reader.IsDBNull(memberOrdinal))
+                dto.MemberCount = reader.GetInt32(memberOrdinal);
+        }
+        catch (IndexOutOfRangeException)
+        {
+            // optional column
+        }
+
+        try
+        {
+            var lastMsgOrdinal = reader.GetOrdinal("last_message");
+            if (!reader.IsDBNull(lastMsgOrdinal))
+                dto.LastMessage = reader.GetString(lastMsgOrdinal);
+        }
+        catch (IndexOutOfRangeException)
+        {
+            // optional column
+        }
+
+        try
+        {
+            var lastAtOrdinal = reader.GetOrdinal("last_message_at");
+            if (!reader.IsDBNull(lastAtOrdinal))
+                dto.LastMessageAt = reader.GetFieldValue<DateTimeOffset>(lastAtOrdinal);
+        }
+        catch (IndexOutOfRangeException)
+        {
+            // optional column
         }
 
         return dto;

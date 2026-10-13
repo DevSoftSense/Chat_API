@@ -22,6 +22,7 @@ public sealed class ChatController : ControllerBase
     private readonly IGroupService _groupService;
     private readonly IOrganisationSettingService _organisationSettingService;
     private readonly IGroupRepository _groupRepository;
+    private readonly ICommObserverAccessService _commObserverAccess;
     private readonly IHubContext<ChatHub> _hubContext;
     private readonly IConfiguration _configuration;
     private readonly ChatAttachmentStorage _attachmentStorage;
@@ -31,6 +32,7 @@ public sealed class ChatController : ControllerBase
         IGroupService groupService,
         IOrganisationSettingService organisationSettingService,
         IGroupRepository groupRepository,
+        ICommObserverAccessService commObserverAccess,
         IHubContext<ChatHub> hubContext,
         IConfiguration configuration,
         ChatAttachmentStorage attachmentStorage)
@@ -39,6 +41,7 @@ public sealed class ChatController : ControllerBase
         _groupService = groupService;
         _organisationSettingService = organisationSettingService;
         _groupRepository = groupRepository;
+        _commObserverAccess = commObserverAccess;
         _hubContext = hubContext;
         _configuration = configuration;
         _attachmentStorage = attachmentStorage;
@@ -63,6 +66,237 @@ public sealed class ChatController : ControllerBase
                 user1Id, user2Id, tenant.OrgId, tenant.AppId, tenant.FiscalYearId, cancellationToken);
 
             return Ok(result);
+        }
+        catch (ChatOperationException ex)
+        {
+            return StatusCode(ex.StatusCode, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Required SoftOnCloud userType for All User Communication
+    /// (tab_organisation_setting.AllUserCommunicationUserType — default PRIME).
+    /// UI compares this to the logged-in product-users.userType (no .env).
+    /// </summary>
+    [HttpGet("all-user-communication/required-user-types")]
+    public async Task<IActionResult> GetAllUserCommunicationRequiredUserTypes(
+        [FromQuery] int? orgId,
+        [FromQuery] int? appId,
+        [FromQuery] int? fiscalYearId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userId = CurrentUserHelper.GetUserId(User);
+            if (userId is null)
+                return Unauthorized(new { message = "Authenticated user id claim is missing." });
+
+            var tenant = ResolveTenant(orgId, appId, fiscalYearId);
+            var required = await _organisationSettingService.GetCommFromUserTypesAsync(
+                tenant.OrgId, tenant.AppId, cancellationToken);
+
+            return Ok(new { requiredUserTypes = required });
+        }
+        catch (ChatOperationException ex)
+        {
+            return StatusCode(ex.StatusCode, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// All User Communication: messages between two SoftOnCloud users.
+    /// Participants always; observers only when JWT userType matches
+    /// tab_organisation_setting.AllUserCommunicationUserType (e.g. PRIME, ADMIN, or PRIME,ADMIN).
+    /// </summary>
+    [HttpGet("private/{user1Id:long}/{user2Id:long}/messages")]
+    public async Task<IActionResult> GetPrivateMessagesBetweenUsers(
+        long user1Id,
+        long user2Id,
+        [FromQuery] int? orgId,
+        [FromQuery] int? appId,
+        [FromQuery] int? fiscalYearId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userId = CurrentUserHelper.GetUserId(User);
+            if (userId is null)
+                return Unauthorized(new { message = "Authenticated user id claim is missing." });
+
+            if (user1Id <= 0 || user2Id <= 0 || user1Id == user2Id)
+                return BadRequest(new { message = "user1Id and user2Id must be different positive SoftOnCloud user ids." });
+
+            var tenant = ResolveTenant(orgId, appId, fiscalYearId);
+            var requiredTypes = await _organisationSettingService.GetCommFromUserTypesAsync(
+                tenant.OrgId, tenant.AppId, cancellationToken);
+
+            var isParticipant = userId.Value == user1Id || userId.Value == user2Id;
+            var isObserver = await _commObserverAccess.IsObserverAsync(
+                User, requiredTypes, tenant.OrgId, tenant.AppId, cancellationToken);
+            if (!isParticipant && !isObserver)
+            {
+                return StatusCode(403, new
+                {
+                    message = "Not authorized. Your SoftOnCloud userType or Admin role must match AllUserCommunicationUserType in organisation settings."
+                });
+            }
+
+            var privateChat = await _chatService.GetOrCreatePrivateChatAsync(
+                user1Id, user2Id, tenant.OrgId, tenant.AppId, tenant.FiscalYearId, cancellationToken);
+
+            var asUserId = isParticipant ? userId.Value : user1Id;
+            var messages = await _chatService.GetChatMessagesAsync(
+                privateChat.ChatId, asUserId, tenant.OrgId, tenant.AppId, tenant.FiscalYearId, cancellationToken);
+
+            return Ok(messages);
+        }
+        catch (ChatOperationException ex)
+        {
+            return StatusCode(ex.StatusCode, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// All User Communication: all active organisation groups (observer only).
+    /// </summary>
+    [HttpGet("all-user-communication/groups")]
+    public async Task<IActionResult> GetOrganisationGroupsForObserver(
+        [FromQuery] int? orgId,
+        [FromQuery] int? appId,
+        [FromQuery] int? fiscalYearId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userId = CurrentUserHelper.GetUserId(User);
+            if (userId is null)
+                return Unauthorized(new { message = "Authenticated user id claim is missing." });
+
+            var tenant = ResolveTenant(orgId, appId, fiscalYearId);
+            if (tenant.FiscalYearId is null or <= 0)
+                return BadRequest(new { message = "fiscalYearId is required." });
+
+            var requiredTypes = await _organisationSettingService.GetCommFromUserTypesAsync(
+                tenant.OrgId, tenant.AppId, cancellationToken);
+
+            if (!await _commObserverAccess.IsObserverAsync(
+                    User, requiredTypes, tenant.OrgId, tenant.AppId, cancellationToken))
+            {
+                return StatusCode(403, new
+                {
+                    message = "Not authorized. Your SoftOnCloud userType or Admin role must match AllUserCommunicationUserType in organisation settings."
+                });
+            }
+
+            var groups = await _groupService.GetOrganisationGroupsAsync(
+                tenant.OrgId, tenant.AppId, tenant.FiscalYearId.Value, cancellationToken);
+
+            return Ok(groups);
+        }
+        catch (ChatOperationException ex)
+        {
+            return StatusCode(ex.StatusCode, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// All User Communication: active members of a group (observer only, read-only).
+    /// </summary>
+    [HttpGet("all-user-communication/groups/{groupId:long}/members")]
+    public async Task<IActionResult> GetOrganisationGroupMembersForObserver(
+        long groupId,
+        [FromQuery] int? orgId,
+        [FromQuery] int? appId,
+        [FromQuery] int? fiscalYearId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userId = CurrentUserHelper.GetUserId(User);
+            if (userId is null)
+                return Unauthorized(new { message = "Authenticated user id claim is missing." });
+
+            if (groupId <= 0)
+                return BadRequest(new { message = "groupId is required." });
+
+            var tenant = ResolveTenant(orgId, appId, fiscalYearId);
+            if (tenant.FiscalYearId is null or <= 0)
+                return BadRequest(new { message = "fiscalYearId is required." });
+
+            var requiredTypes = await _organisationSettingService.GetCommFromUserTypesAsync(
+                tenant.OrgId, tenant.AppId, cancellationToken);
+
+            if (!await _commObserverAccess.IsObserverAsync(
+                    User, requiredTypes, tenant.OrgId, tenant.AppId, cancellationToken))
+            {
+                return StatusCode(403, new
+                {
+                    message = "Not authorized. Your SoftOnCloud userType or Admin role must match AllUserCommunicationUserType in organisation settings."
+                });
+            }
+
+            var members = await _groupService.GetOrganisationGroupMembersAsync(
+                groupId, tenant.OrgId, tenant.AppId, tenant.FiscalYearId.Value, cancellationToken);
+
+            return Ok(members);
+        }
+        catch (ChatOperationException ex)
+        {
+            return StatusCode(ex.StatusCode, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// All User Communication: group chat messages (observer only).
+    /// Loads via an active group member context — read-only monitoring.
+    /// </summary>
+    [HttpGet("all-user-communication/chats/{chatId:int}/messages")]
+    public async Task<IActionResult> GetGroupChatMessagesForObserver(
+        int chatId,
+        [FromQuery] int? orgId,
+        [FromQuery] int? appId,
+        [FromQuery] int? fiscalYearId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userId = CurrentUserHelper.GetUserId(User);
+            if (userId is null)
+                return Unauthorized(new { message = "Authenticated user id claim is missing." });
+
+            if (chatId <= 0)
+                return BadRequest(new { message = "chatId is required." });
+
+            var tenant = ResolveTenant(orgId, appId, fiscalYearId);
+            if (tenant.FiscalYearId is null or <= 0)
+                return BadRequest(new { message = "fiscalYearId is required." });
+
+            var requiredTypes = await _organisationSettingService.GetCommFromUserTypesAsync(
+                tenant.OrgId, tenant.AppId, cancellationToken);
+
+            if (!await _commObserverAccess.IsObserverAsync(
+                    User, requiredTypes, tenant.OrgId, tenant.AppId, cancellationToken))
+            {
+                return StatusCode(403, new
+                {
+                    message = "Not authorized. Your SoftOnCloud userType or Admin role must match AllUserCommunicationUserType in organisation settings."
+                });
+            }
+
+            var groupId = await _groupRepository.GetGroupIdByChatIdAsync(
+                chatId, tenant.OrgId, tenant.AppId, tenant.FiscalYearId.Value, cancellationToken);
+            if (groupId is null or <= 0)
+                return NotFound(new { message = "Group chat not found for this organisation." });
+
+            var memberUserId = await _groupService.GetFirstActiveGroupMemberUserIdAsync(
+                groupId.Value, tenant.OrgId, tenant.AppId, tenant.FiscalYearId.Value, cancellationToken);
+            if (memberUserId is null or <= 0)
+                return Ok(Array.Empty<object>());
+
+            var messages = await _chatService.GetChatMessagesAsync(
+                chatId, memberUserId.Value, tenant.OrgId, tenant.AppId, tenant.FiscalYearId, cancellationToken);
+
+            return Ok(messages);
         }
         catch (ChatOperationException ex)
         {
@@ -187,6 +421,9 @@ public sealed class ChatController : ControllerBase
             await _hubContext.Clients
                 .Group(ChatHub.UserGroup(saved.SenderUserId))
                 .SendAsync("ReceiveMessage", payload, cancellationToken);
+
+            await NotifyCommObserversAsync(
+                tenant.OrgId, tenant.AppId, "ReceiveMessage", payload, cancellationToken);
 
             // Online receiver ⇒ delivered (double grey), not read.
             if (ChatHub.IsUserOnline(saved.ReceiverUserId.Value))
@@ -568,6 +805,9 @@ public sealed class ChatController : ControllerBase
                 .Group(ChatHub.UserGroup(saved.SenderUserId))
                 .SendAsync("ReceiveMessage", payload, cancellationToken);
 
+            await NotifyCommObserversAsync(
+                tenant.OrgId, tenant.AppId, "ReceiveMessage", payload, cancellationToken);
+
             if (ChatHub.IsUserOnline(saved.ReceiverUserId.Value))
             {
                 await _hubContext.Clients
@@ -687,19 +927,22 @@ public sealed class ChatController : ControllerBase
 
             if (groupId is > 0)
             {
+                var groupDeletePayload = new
+                {
+                    payload.messageId,
+                    payload.chatId,
+                    payload.senderUserId,
+                    payload.receiverUserId,
+                    payload.deletedBy,
+                    payload.deletedAt,
+                    payload.deleteFlag,
+                    groupId = groupId.Value
+                };
                 await _hubContext.Clients
                     .Group(ChatHub.ChatGroup(groupId.Value))
-                    .SendAsync("MessageDeleted", new
-                    {
-                        payload.messageId,
-                        payload.chatId,
-                        payload.senderUserId,
-                        payload.receiverUserId,
-                        payload.deletedBy,
-                        payload.deletedAt,
-                        payload.deleteFlag,
-                        groupId = groupId.Value
-                    }, cancellationToken);
+                    .SendAsync("MessageDeleted", groupDeletePayload, cancellationToken);
+                await NotifyCommObserversAsync(
+                    tenant.OrgId, tenant.AppId, "MessageDeleted", groupDeletePayload, cancellationToken);
             }
             else
             {
@@ -713,6 +956,9 @@ public sealed class ChatController : ControllerBase
                         .Group(ChatHub.UserGroup(notifyUserId))
                         .SendAsync("MessageDeleted", payload, cancellationToken);
                 }
+
+                await NotifyCommObserversAsync(
+                    tenant.OrgId, tenant.AppId, "MessageDeleted", payload, cancellationToken);
             }
 
             return Ok(result);
@@ -1083,6 +1329,24 @@ public sealed class ChatController : ControllerBase
     }
 
     /// <summary>
+    /// Live fan-out to All User Communication observers (SignalR room only — no Groups page change).
+    /// </summary>
+    private Task NotifyCommObserversAsync(
+        int orgId,
+        int appId,
+        string eventName,
+        object payload,
+        CancellationToken cancellationToken)
+    {
+        if (orgId <= 0 || appId <= 0 || string.IsNullOrWhiteSpace(eventName))
+            return Task.CompletedTask;
+
+        return _hubContext.Clients
+            .Group(ChatHub.CommObserversGroup(orgId, appId))
+            .SendAsync(eventName, payload, cancellationToken);
+    }
+
+    /// <summary>
     /// Group message: hub broadcast + per-member user hub + "New Message" notifications.
     /// </summary>
     private async Task NotifyGroupMessageAsync(
@@ -1097,6 +1361,8 @@ public sealed class ChatController : ControllerBase
         await _hubContext.Clients
             .Group(ChatHub.ChatGroup(saved.GroupId!.Value))
             .SendAsync("ReceiveMessage", payload, cancellationToken);
+
+        await NotifyCommObserversAsync(orgId, appId, "ReceiveMessage", payload, cancellationToken);
 
         if (fiscalYearId is not > 0)
             return;

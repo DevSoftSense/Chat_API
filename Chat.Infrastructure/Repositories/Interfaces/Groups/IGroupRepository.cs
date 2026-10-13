@@ -22,6 +22,29 @@ public interface IGroupRepository
         int fiscalYearId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>All active organisation groups (All User Communication observers).</summary>
+    Task<IReadOnlyList<ChatGroupDto>> GetOrganisationGroupsAsync(
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Any active member user id — used to load group messages as observer.</summary>
+    Task<long?> GetFirstActiveGroupMemberUserIdAsync(
+        long groupId,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Active members for a group (All User Communication observer — no membership required).</summary>
+    Task<IReadOnlyList<ChatGroupMemberDto>> GetOrganisationGroupMembersAsync(
+        long groupId,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default);
+
     Task<ChatGroupDetailsDto> GetGroupDetailsAsync(
         long groupId,
         long userId,

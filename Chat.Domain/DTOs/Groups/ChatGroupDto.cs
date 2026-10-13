@@ -14,6 +14,11 @@ public sealed class ChatGroupDto
     public bool IsAdmin { get; set; }
     /// <summary>Unread inbound group messages for the current user (receipt-based).</summary>
     public int UnreadCount { get; set; }
+    /// <summary>Active member count (All User Communication observer list).</summary>
+    public int? MemberCount { get; set; }
+    /// <summary>Latest non-draft group message preview (observer list).</summary>
+    public string? LastMessage { get; set; }
+    public DateTimeOffset? LastMessageAt { get; set; }
 }
 
 public sealed class ChatGroupMemberDto

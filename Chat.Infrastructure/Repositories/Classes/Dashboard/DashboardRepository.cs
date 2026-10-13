@@ -878,15 +878,13 @@ LIMIT 5;";
         int orgId, int appId, int? fiscalYearId,
         CancellationToken cancellationToken)
     {
+        // SoftOnCloud owns department names (product-users API). Chat DB has no reliable
+        // department_name column — return a single aggregate bucket for the chart.
         const string sql = @"
 SELECT
     'Other'::text AS department,
     COUNT(*)::integer AS message_count
 FROM public.tab_messages m
-LEFT JOIN public.tab_employee_master e
-    ON e.user_id::bigint = m.sender_user_id
-   AND e.org_id = m.org_id
-   AND (e.app_id = m.app_id OR e.app_id IS NULL)
 WHERE m.org_id = @p_org_id
   AND m.app_id = @p_app_id
   AND (
@@ -937,13 +935,15 @@ ORDER BY message_count DESC, department ASC;";
         long userId, int orgId, int appId, int? fiscalYearId,
         CancellationToken cancellationToken)
     {
+        // SoftOnCloud owns department display names — tab_announcements has department_id only.
+        // Do not join tab_department_master or select a.department_name (column does not exist).
         const string sql = @"
 SELECT
     a.announcement_id,
     COALESCE(a.title, '') AS title,
     COALESCE(a.description, '') AS description,
     c.category_name,
-    COALESCE(NULLIF(TRIM(a.department_name), ''), '') AS department_name,
+    ''::text AS department_name,
     CASE
         WHEN a.expires_at IS NOT NULL AND a.expires_at < NOW() THEN 3
         WHEN a.expires_at IS NOT NULL AND a.expires_at <= (NOW() + INTERVAL '7 days') THEN 2
@@ -1029,13 +1029,15 @@ LIMIT 5;";
         long userId, int orgId, int appId, int? fiscalYearId,
         CancellationToken cancellationToken)
     {
+        // SoftOnCloud owns department display names — do not select a.department_name
+        // or join tab_department_master (d.department_name does not exist on Chat tenant).
         const string sql = @"
 SELECT
     a.announcement_id,
     COALESCE(a.title, '') AS title,
     COALESCE(a.description, '') AS description,
     c.category_name,
-    COALESCE(NULLIF(TRIM(a.department_name), ''), '') AS department_name,
+    ''::text AS department_name,
     CASE
         WHEN a.expires_at IS NOT NULL AND a.expires_at < NOW() THEN 3
         WHEN a.expires_at IS NOT NULL AND a.expires_at <= (NOW() + INTERVAL '7 days') THEN 2

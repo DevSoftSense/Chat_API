@@ -66,6 +66,51 @@ public sealed class GroupService : IGroupService
             authenticatedUserId, orgId, appId, fiscalYearId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<ChatGroupDto>> GetOrganisationGroupsAsync(
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        if (orgId <= 0 || appId <= 0 || fiscalYearId <= 0)
+            throw new ChatOperationException("orgId, appId and fiscalYearId are required.");
+
+        return await _groupRepository.GetOrganisationGroupsAsync(
+            orgId, appId, fiscalYearId, cancellationToken);
+    }
+
+    public async Task<long?> GetFirstActiveGroupMemberUserIdAsync(
+        long groupId,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        if (groupId <= 0)
+            throw new ChatOperationException("groupId is required.");
+        if (orgId <= 0 || appId <= 0 || fiscalYearId <= 0)
+            throw new ChatOperationException("orgId, appId and fiscalYearId are required.");
+
+        return await _groupRepository.GetFirstActiveGroupMemberUserIdAsync(
+            groupId, orgId, appId, fiscalYearId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ChatGroupMemberDto>> GetOrganisationGroupMembersAsync(
+        long groupId,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        if (groupId <= 0)
+            throw new ChatOperationException("groupId is required.");
+        if (orgId <= 0 || appId <= 0 || fiscalYearId <= 0)
+            throw new ChatOperationException("orgId, appId and fiscalYearId are required.");
+
+        return await _groupRepository.GetOrganisationGroupMembersAsync(
+            groupId, orgId, appId, fiscalYearId, cancellationToken);
+    }
+
     public async Task<ChatGroupDetailsDto> GetGroupDetailsAsync(
         long groupId,
         long authenticatedUserId,

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Chat.Application.Services.Interfaces.Groups;
+using Chat.Application.Services.Interfaces.Organisation;
 using Chat.Domain.Exceptions.Messages;
 using Chat_Api.Helpers;
 using Microsoft.AspNetCore.Authorization;
@@ -12,18 +13,28 @@ namespace Chat_Api.Hubs.Messages;
 /// Chat + in-memory presence (Online/Offline). No database for presence.
 /// Also relays delivery acks on the same hub (no second connection).
 /// Group Chat uses additive SignalR groups: group:{groupId}.
+/// All User Communication observers: comm-observers:{orgId}:{appId}.
 /// </summary>
 [Authorize]
 public sealed class ChatHub : Hub
 {
     private readonly IGroupService _groupService;
+    private readonly IOrganisationSettingService _organisationSettingService;
+    private readonly ICommObserverAccessService _commObserverAccess;
     private readonly IConfiguration _configuration;
+
+    /// <summary>connectionId → observer SignalR group name (for disconnect cleanup).</summary>
+    private static readonly ConcurrentDictionary<string, string> ObserverGroupByConnection = new();
 
     public ChatHub(
         IGroupService groupService,
+        IOrganisationSettingService organisationSettingService,
+        ICommObserverAccessService commObserverAccess,
         IConfiguration configuration)
     {
         _groupService = groupService;
+        _organisationSettingService = organisationSettingService;
+        _commObserverAccess = commObserverAccess;
         _configuration = configuration;
     }
 
@@ -31,6 +42,10 @@ public sealed class ChatHub : Hub
 
     /// <summary>SignalR group name for Group Chat realtime delivery.</summary>
     public static string ChatGroup(long groupId) => $"group:{groupId}";
+
+    /// <summary>All User Communication observers (PRIME/ADMIN per org setting).</summary>
+    public static string CommObserversGroup(int orgId, int appId) =>
+        $"comm-observers:{orgId}:{appId}";
 
     /// <summary>userId → active SignalR connection count (multi-tab safe).</summary>
     private static readonly ConcurrentDictionary<long, int> OnlineConnectionCounts = new();
@@ -183,6 +198,9 @@ public sealed class ChatHub : Hub
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        if (ObserverGroupByConnection.TryRemove(Context.ConnectionId, out var observerGroup))
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, observerGroup);
+
         var userId = CurrentUserHelper.GetUserId(Context.User);
         if (userId is not null)
         {
@@ -202,6 +220,39 @@ public sealed class ChatHub : Hub
         }
 
         await base.OnDisconnectedAsync(exception);
+    }
+
+    /// <summary>
+    /// All User Communication page: join org observer SignalR room (JWT userType must match setting).
+    /// Does not change Groups membership — live ReceiveMessage / MessageDeleted only.
+    /// </summary>
+    public async Task JoinCommObserverWatch(int? orgId = null, int? appId = null)
+    {
+        var userId = CurrentUserHelper.GetUserId(Context.User)
+            ?? throw new HubException("Authenticated user id claim is missing.");
+
+        var tenant = ResolveTenant(orgId, appId, null);
+        if (tenant.OrgId <= 0 || tenant.AppId <= 0)
+            throw new HubException("orgId and appId are required.");
+
+        var requiredTypes = await _organisationSettingService.GetCommFromUserTypesAsync(
+            tenant.OrgId, tenant.AppId);
+
+        if (!await _commObserverAccess.IsObserverAsync(
+                Context.User, requiredTypes, tenant.OrgId, tenant.AppId))
+            throw new HubException(
+                "Not authorized for All User Communication observer watch.");
+
+        var groupName = CommObserversGroup(tenant.OrgId, tenant.AppId);
+        await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+        ObserverGroupByConnection[Context.ConnectionId] = groupName;
+    }
+
+    public async Task LeaveCommObserverWatch()
+    {
+        if (!ObserverGroupByConnection.TryRemove(Context.ConnectionId, out var groupName))
+            return;
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
     }
 
     /// <summary>Client joins group:{groupId} after membership is verified.</summary>

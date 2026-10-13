@@ -75,12 +75,12 @@ public sealed class SettingsRepository : ISettingsRepository
     {
         var prefix = $"{userId}.";
         const string sql = @"
-SELECT setting_key, setting_value
-FROM public.tab_organisation_setting
-WHERE org_id = @org_id
-  AND app_id = @app_id
-  AND setting_group = @setting_group
-  AND setting_key LIKE @key_prefix;";
+            SELECT setting_key, setting_value
+            FROM public.tab_organisation_setting
+            WHERE org_id = @org_id
+              AND app_id = @app_id
+              AND setting_group = @setting_group
+              AND setting_key LIKE @key_prefix;";
 
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try

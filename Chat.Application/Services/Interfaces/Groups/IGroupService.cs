@@ -19,6 +19,26 @@ public interface IGroupService
         int fiscalYearId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<ChatGroupDto>> GetOrganisationGroupsAsync(
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default);
+
+    Task<long?> GetFirstActiveGroupMemberUserIdAsync(
+        long groupId,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ChatGroupMemberDto>> GetOrganisationGroupMembersAsync(
+        long groupId,
+        int orgId,
+        int appId,
+        int fiscalYearId,
+        CancellationToken cancellationToken = default);
+
     Task<ChatGroupDetailsDto> GetGroupDetailsAsync(
         long groupId,
         long authenticatedUserId,
